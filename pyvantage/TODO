@@ -1,0 +1,2 @@
+* Capture the variable names that correspond to LED button values that need to be set when loads controlled by home assistant change
+* Make hass write "variable foo 1" to turn led off, or "variable foo 2" to turn button led on
