@@ -614,8 +614,8 @@ class Vantage():
                 continue
             if self._name_mappings:
                 mapped_name = self._name_mappings.get(ns.lower(), None)
-                if mapped_name:
-                    if mapped_name:
+                if mapped_name is not None:
+                    if mapped_name is True:
                         continue
                     ns = mapped_name
             name += ns + "-"
