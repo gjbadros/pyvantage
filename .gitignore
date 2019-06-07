@@ -1,3 +1,5 @@
 *_config.txt
 __pycache__
 *.pyc
+*.egg-info
+dist
