@@ -987,6 +987,11 @@ class VantageEntity():
         """
         return None
 
+    @property
+    def type(self):
+        """The type of object (for units in hass)."""
+        return None
+
     def is_output(self):
         """Return true iff this is an output."""
         return False
@@ -1246,8 +1251,13 @@ class Button(VantageEntity):
 
     @property
     def value(self):
-        """The value of the variable."""
+        """The value of the last action of the button."""
         return self._value
+
+    @property
+    def type(self):
+        """The type of object (for units in hass)."""
+        return 'button'
 
     @property
     def number(self):
@@ -1309,6 +1319,11 @@ class Keypad(VantageEntity):
     def buttons(self):
         """Return a tuple of buttons for this keypad."""
         return tuple(button for button in self._buttons)
+
+    @property
+    def type(self):
+        """The type of object (for units in hass)."""
+        return 'keypad'
 
     @property
     def value(self):
@@ -1466,6 +1481,11 @@ class Variable(VantageEntity):
     def value(self):
         """The value of the variable."""
         return self._value
+
+    @property
+    def type(self):
+        """The type of object (for units in hass)."""
+        return 'variable'
 
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
