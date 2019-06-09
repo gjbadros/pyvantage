@@ -1245,6 +1245,11 @@ class Button(VantageEntity):
                     'desc': self._desc})
 
     @property
+    def value(self):
+        """The value of the variable."""
+        return self._value
+
+    @property
     def number(self):
         """Returns the button number."""
         return self._num
@@ -1304,6 +1309,11 @@ class Keypad(VantageEntity):
     def buttons(self):
         """Return a tuple of buttons for this keypad."""
         return tuple(button for button in self._buttons)
+
+    @property
+    def value(self):
+        """The value of the variable."""
+        return self._value
 
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's an event from this keypad."""
