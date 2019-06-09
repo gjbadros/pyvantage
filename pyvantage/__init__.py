@@ -4,7 +4,7 @@ Basic operations for enumerating and controlling the loads are supported.
 
 Author: Greg J. Badros
 
-Based on pylutron which was written by Dima Zavin
+Originally based on pylutron which was written by Dima Zavin
 
 See also https://www.npmjs.com/package/vantage-infusion
 and https://github.com/angeloxx/homebridge-vantage/blob/master/index.js
@@ -19,8 +19,8 @@ Then the component/vantage.py and its require line will work.
 """
 
 __Author__ = "Greg J. Badros"
-__copyright__ = "Copyright 2018, Greg J. Badros"
-  # Dima Zavin wrote pylutron on which this is heavily based
+__copyright__ = "Copyright 2018, 2019 Greg J. Badros"
+# Dima Zavin wrote pylutron on which this was originally heavily based
 
 import logging
 import telnetlib
@@ -127,13 +127,13 @@ class VantageConnection(threading.Thread):
         self._telnet = telnetlib.Telnet(self._host, self._cmd_port)
         self.send_ascii_nl("LOGIN " + self._user + " " + self._password)
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS load")
+        self.send_ascii_nl("STATUS LOAD")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS blind")
+        self.send_ascii_nl("STATUS BLIND")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS led")
+        self.send_ascii_nl("STATUS BTN")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS variable")
+        self.send_ascii_nl("STATUS VARIABLE")
         return True
 
     def _disconnect(self):
@@ -147,7 +147,7 @@ class VantageConnection(threading.Thread):
         """Reconnects to the controller if we have been previously disconnected."""
         with self._lock:
             if not self._connected:
-                _LOGGER.info("Connecting")
+                _LOGGER.info("Connecting to %s", self._host)
                 self._lock.release()
                 try:
                     self._do_login()
@@ -159,7 +159,7 @@ class VantageConnection(threading.Thread):
 
     def run(self):
         """Main thread function to maintain connection and receive remote status."""
-        _LOGGER.info("Started")
+        _LOGGER.debug("VantageConnection run started")
         while True:
             self._maybe_reconnect()
             try:
@@ -169,8 +169,14 @@ class VantageConnection(threading.Thread):
                 self._disconnect()
                 continue
             self._recv_cb(line.decode('ascii').rstrip())
-            _LOGGER.debug("finished _recv_cb")
 
+
+def _desc_from_t1t2(t1, t2):
+    if not t2:
+        desc = t1 or ''
+    else:
+        desc = t1 + ' ' + t2
+    return desc.strip()
 
 class VantageXmlDbParser():
     """The parser for Vantage XML database.
@@ -186,6 +192,8 @@ class VantageXmlDbParser():
         self.outputs = []
         self.variables = []
         self.tasks = []
+        self.buttons = []
+        self.keypads = []
         self.load_groups = []
         self.vid_to_area = {}
         self.vid_to_load = {}
@@ -257,29 +265,38 @@ class VantageXmlDbParser():
         keypads = root.findall(".//Objects//Keypad[@VID]")
         for kp_xml in keypads:
             keypad = self._parse_keypad(kp_xml)
-            self.vid_to_keypad[keypad.vid] = keypad
             _LOGGER.info("keypad = %s", keypad)
+            self.vid_to_keypad[keypad.vid] = keypad
             self.vid_to_area[keypad.area].add_keypad(keypad)
+            self.keypads.append(keypad)
 
         buttons = root.findall(".//Objects//Button[@VID]")
         for button_xml in buttons:
             b = self._parse_button(button_xml)
+            if not b:
+                continue
             _LOGGER.info("b = %s", b)
+            self.vid_to_button[b.vid] = b
+            if b.area != -1:
+                self.vid_to_area[b.area].add_button(b)
+                self.buttons.append(b)
 
         variables = root.findall(".//Objects//GMem[@VID]")
         for v in variables:
             var = self._parse_variable(v)
-            self.vid_to_variable[var.vid] = var
-            self.variables.append(var)
             _LOGGER.info("var = %s", var)
+            self.vid_to_variable[var.vid] = var
+            # N.B. variables have categories, not areas, so no add to area
+            self.variables.append(var)
 
         tasks = root.findall(".//Objects//Task[@VID]")
         for t in tasks:
             task = self._parse_task(t)
+            _LOGGER.info("task = %s", task)
             self.vid_to_task[task.vid] = task
             self.name_to_task[task.name] = task
+            # N.B. tasks have categories, not areas, so no add to area
             self.tasks.append(task)
-            _LOGGER.info("task = %s", task)
 
         ## Lots of different shade types, one xpath for each kind of shade
         # MechoShade driver shades
@@ -464,7 +481,7 @@ class VantageXmlDbParser():
             else:
                 _LOGGER.warning("for loadgroup %d, vid %s supports color", vid, v)
 
-
+        out_name += ' [G]'
         output = LoadGroup(self._vantage,
                            name=out_name,
                            area=area_vid,
@@ -477,7 +494,7 @@ class VantageXmlDbParser():
         """Parses a keypad device."""
         area_vid = int(keypad_xml.find('Area').text)
         keypad = Keypad(self._vantage,
-                        name=keypad_xml.find('Name').text,
+                        name=keypad_xml.find('Name').text + ' [K]',
                         area=area_vid,
                         vid=int(keypad_xml.get('VID')))
         return keypad
@@ -492,19 +509,20 @@ class VantageXmlDbParser():
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
         vid = int(button_xml.get('VID'))
-        name = button_xml.find('Name').text
+        name = button_xml.find('Name').text + ' [B]'
+        text1 = button_xml.find('Text1').text
+        text2 = button_xml.find('Text2').text
+        desc = _desc_from_t1t2(text1, text2)
         parent = button_xml.find('Parent')
         parent_vid = int(parent.text)
         num = int(parent.get('Position'))
         keypad = self._vantage._ids['KEYPAD'].get(parent_vid, None)
         if keypad is None:
-            _LOGGER.warning("Could not find parent vid = %d for button vid = %d", parent_vid, vid)
-            area = -1
-        else:
-            area = keypad.area
-        button = Button(self._vantage, name, area, vid, num, parent_vid)
-        if keypad:
-            keypad.add_button(button)
+            _LOGGER.warning("Could not find parent vid = %d for button vid = %d (leaving button out)", parent_vid, vid)
+            return None
+        area = keypad.area
+        button = Button(self._vantage, name, area, vid, num, parent_vid, keypad, desc)
+        keypad.add_button(button)
         return button
 
     def _parse_motion_sensor(self, sensor_xml):
@@ -564,7 +582,7 @@ class Vantage():
         self._vid_to_shade = {}  # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
                         'GETBLIND', 'BLIND', 'INVOKE']
-        self._s_cmds = ['LOAD', 'TASK', 'LED', 'VARIABLE', 'BLIND', 'STATUS']
+        self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
 
     def subscribe(self, obj, handler):
         """Subscribes to status updates of the requested object.
@@ -577,7 +595,7 @@ class Vantage():
     def get_lineage_from_obj(self, obj):
         """Return list of areas for obj, chasing up to top."""
         count = 0
-        area = self._vid_to_area.get(obj.area, None)
+        area = self._vid_to_area.get(obj.area)
         if area is None:
             return []
         answer = [area.name]
@@ -586,7 +604,7 @@ class Vantage():
             parent_vid = area.parent
             if parent_vid == 0:
                 break
-            area = self._vid_to_area.get(parent_vid, None)
+            area = self._vid_to_area.get(parent_vid)
             if area:
                 answer.append(area.name)
 #    _LOGGER.info("lineage for " + str(obj.vid) + " is " + str(answer))
@@ -633,7 +651,7 @@ class Vantage():
         if obj.name in self._names:
             oldname = obj.name
             obj.name += " (%s)" % (str(obj.vid))
-            if '0-10V RELAYS' in oldname or cmd_type == 'LED':
+            if '0-10V RELAYS' in oldname or cmd_type == 'BTN':
                 _LOGGER.info("Repeated name `%s' - adding vid to get %s", oldname, obj.name)
             else:
                 _LOGGER.warning("Repeated name `%s' - adding vid to get %s", oldname, obj.name)
@@ -694,7 +712,6 @@ class Vantage():
                 return
             vid = int(vid)
             if vid not in ids:
-#        if not line.startswith("S:LED"):
                 _LOGGER.warning("Unknown id %d (%s)", vid, line)
                 return
             obj = ids[vid]
@@ -947,7 +964,7 @@ class VantageEntity():
         c = 0
         while True and c < 5:
             c += 1
-            area = self._vantage._vid_to_area.get(avid, None)
+            area = self._vantage._vid_to_area.get(avid)
             if area is None:
                 break
             areas.append(area.name)
@@ -1203,23 +1220,27 @@ class Button(VantageEntity):
     """This object represents a keypad button that we can trigger and handle
     events for (button presses)."""
 
-    CMD_TYPE = 'LED' # for a button
+    CMD_TYPE = 'BTN' # for a button
 
-    def __init__(self, vantage, name, area, vid, num, parent):
+    def __init__(self, vantage, name, area, vid, num, parent, keypad, desc):
         super(Button, self).__init__(vantage, name, area, vid)
         self._num = num
         self._parent = parent
+        self._keypad = keypad
+        self._desc = desc
+        self._value = None  # the last action reported
         self._vantage.register_id(Button.CMD_TYPE, None, self)
 
     def __str__(self):
         """Pretty printed string value of the Button object."""
-        return 'Button name: "%s" num: %d area: %d vid: %d parent: %d' % (
-            self._name, self._num, self._area, self._vid, self._parent)
+        return 'Button name: "%s" num: %d area: %d vid: %d parent: %d [%s]' % (
+            self._name, self._num, self._area, self._vid, self._parent, self._desc)
 
     def __repr__(self):
         """String representation of the Button object."""
         return str({'name': self._name, 'num': self._num,
-                    'area': self._area, 'vid': self._vid})
+                    'area': self._area, 'vid': self._vid,
+                    'desc': self._desc})
 
     @property
     def number(self):
@@ -1228,11 +1249,11 @@ class Button(VantageEntity):
 
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's an event from this keypad."""
-        component = int(args[0])
-        action = int(args[1])
-#    params = [int(x) for x in args[2:]]
-        _LOGGER.debug("Updating %d(%s): c=%d a=%d params=%s",
-                      self._vid, self._name, component, action, args[2:])
+        action = args[0]
+        _LOGGER.debug("Button %d(%s): action=%s params=%s",
+                      self._vid, self._name, action, args[1:])
+        self._value = action
+        self._keypad._value = self._name
         return self
 
 class LoadGroup(Output):
@@ -1264,6 +1285,7 @@ class Keypad(VantageEntity):
         """Initializes the Keypad object."""
         super(Keypad, self).__init__(vantage, name, area, vid)
         self._buttons = []
+        self._value = None
         self._vantage.register_id(Keypad.CMD_TYPE, None, self)
 
     def add_button(self, button):
@@ -1286,7 +1308,7 @@ class Keypad(VantageEntity):
         component = int(args[0])
         action = int(args[1])
         params = [int(x) for x in args[2:]]
-        _LOGGER.debug("Updating %d(%s): c=%d a=%d params=%s",
+        _LOGGER.debug("Keypad %d(%s): c=%d a=%d params=%s",
                       self._vid, self._name, component, action, params)
         return self
 
@@ -1312,7 +1334,7 @@ class Task(VantageEntity):
         component = int(args[0])
         action = int(args[1])
         params = [int(x) for x in args[2:]]
-        _LOGGER.debug("Updating %d(%s): c=%d a=%d params=%s",
+        _LOGGER.debug("Task %d(%s): c=%d a=%d params=%s",
                       self._vid, self._name, component, action, params)
         return self
 
@@ -1340,7 +1362,10 @@ class Area():
         self._parent = parent
         self._outputs = []
         self._keypads = []
+        self._buttons = []
         self._sensors = []
+        self._variables = []
+        self._tasks = []
 
     def __str__(self):
         """Returns a pretty-printed string for this object."""
@@ -1357,10 +1382,25 @@ class Area():
         initial parsing."""
         self._keypads.append(keypad)
 
+    def add_button(self, button):
+        """Adds a button object that's part of this area, only used during
+        initial parsing."""
+        self._buttons.append(button)
+
     def add_sensor(self, sensor):
         """Adds a motion sensor object that's part of this area, only used during
         initial parsing."""
         self._sensors.append(sensor)
+
+    def add_variable(self, v):
+        """Adds a variable object that's part of this area, only used during
+        initial parsing."""
+        self._variables.append(v)
+
+    def add_task(self, t):
+        """Adds a task object that's part of this area, only used during
+        initial parsing."""
+        self._tasks.append(v)
 
     @property
     def name(self):
