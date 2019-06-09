@@ -858,6 +858,8 @@ class Vantage():
         self.outputs = parser.outputs
         self.variables = parser.variables
         self.tasks = parser.tasks
+        self.buttons = parser.buttons
+        self.keypads = parser.keypads
         self._vid_to_load = parser.vid_to_load
         self._vid_to_variable = parser.vid_to_variable
         self._vid_to_area = parser.vid_to_area
