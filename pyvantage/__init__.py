@@ -1270,7 +1270,7 @@ class Button(VantageEntity):
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
         self._value = action
-        self._keypad._value = self._name
+        self._keypad.handle_update(self._name)
         return self
 
 class LoadGroup(Output):
@@ -1330,13 +1330,11 @@ class Keypad(VantageEntity):
         """The value of the variable."""
         return self._value
 
-    def handle_update(self, args):
-        """The callback invoked by the main event loop if there's an event from this keypad."""
-        component = int(args[0])
-        action = int(args[1])
-        params = [int(x) for x in args[2:]]
-        _LOGGER.debug("Keypad %d(%s): c=%d a=%d params=%s",
-                      self._vid, self._name, component, action, params)
+    def handle_update(self, value):
+        """The callback invoked by a button's handle_update to set keypad value to the name of button."""
+        _LOGGER.debug("Keypad %d(%s): %s",
+                      self._vid, self._name, value)
+        self._value = value
         return self
 
 
