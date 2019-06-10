@@ -1273,7 +1273,7 @@ class Button(VantageEntity):
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
         self._value = action
-        self._keypad.handle_update_and_notify(self._name)
+        self._vantage.handle_update_and_notify(self._keypad, self._name)
         return self
 
 class LoadGroup(Output):
