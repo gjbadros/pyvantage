@@ -717,10 +717,13 @@ class Vantage():
             obj = ids[vid]
             # First let the device update itself
             if typ == 'S' or (typ == 'R' and cmd_type == 'LOAD'):
-                handled = obj.handle_update(args)
-                # Now notify anyone who cares that device  may have changed
-                if handled and handled in self._subscribers:
-                    self._subscribers[handled](handled)
+                self.handle_update_and_notify(obj, args)
+
+    def handle_update_and_notify(self, obj, args)
+        handled = obj.handle_update(args)
+        # Now notify anyone who cares that device  may have changed
+        if handled and handled in self._subscribers:
+            self._subscribers[handled](handled)
 
     def connect(self):
         """Connects to the Vantage controller to send and receive commands and status"""
@@ -1270,7 +1273,7 @@ class Button(VantageEntity):
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
         self._value = action
-        self._keypad.handle_update(self._name)
+        self._keypad.handle_update_and_notify(self._name)
         return self
 
 class LoadGroup(Output):
