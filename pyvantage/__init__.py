@@ -995,6 +995,11 @@ class VantageEntity():
         """The type of object (for units in hass)."""
         return None
 
+    @property
+    def extra_info(self):
+        """Map of extra info."""
+        return self._extra_info
+
     def is_output(self):
         """Return true iff this is an output."""
         return False
@@ -1273,7 +1278,9 @@ class Button(VantageEntity):
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
         self._value = action
-        self._vantage.handle_update_and_notify(self._keypad, self._name)
+        # this transfers control to Keypad.handle_update(...)
+        self._vantage.handle_update_and_notify(self._keypad,
+                                               [self._num, self._name, self._value])
         return self
 
 class LoadGroup(Output):
@@ -1333,11 +1340,15 @@ class Keypad(VantageEntity):
         """The value of the variable."""
         return self._value
 
-    def handle_update(self, value):
+    def handle_update(self, args):
         """The callback invoked by a button's handle_update to set keypad value to the name of button."""
         _LOGGER.debug("Keypad %d(%s): %s",
-                      self._vid, self._name, value)
-        self._value = value
+                      self._vid, self._name, args)
+        self._value = args[0]
+        ei = {}
+        ei['button_name'] = args[1]
+        ei['button_action'] = args[2]
+        self._extra_info = ei
         return self
 
 
