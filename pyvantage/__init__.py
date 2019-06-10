@@ -935,6 +935,7 @@ class VantageEntity():
         self._name = name
         self._area = area
         self._vid = vid
+        self._extra_info = {}
 
     @property
     def name(self):
