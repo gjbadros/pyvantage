@@ -719,7 +719,7 @@ class Vantage():
             if typ == 'S' or (typ == 'R' and cmd_type == 'LOAD'):
                 self.handle_update_and_notify(obj, args)
 
-    def handle_update_and_notify(self, obj, args)
+    def handle_update_and_notify(self, obj, args):
         handled = obj.handle_update(args)
         # Now notify anyone who cares that device  may have changed
         if handled and handled in self._subscribers:
