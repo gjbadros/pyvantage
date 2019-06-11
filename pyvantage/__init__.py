@@ -374,7 +374,7 @@ class VantageXmlDbParser():
         """Parses an OmniSensor tag."""
         var = OmniSensor(self._vantage,
                          name=sensor_xml.find('Name').text,
-                         type=sensor_xml.find('Model').text.lower(),
+                         kind=sensor_xml.find('Model').text.lower(),
                          vid=int(sensor_xml.get('VID')))
         return var
 
@@ -572,7 +572,7 @@ class VantageXmlDbParser():
         num = int(parent.get('Position'))
         keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
         if keypad is None:
-            _LOGGER.warning("Could not find parent vid = %d for button vid = %d (leaving button out)",
+            _LOGGER.warning("No parent vid = %d for button vid = %d (leaving button out)",
                             parent_vid, vid)
             return None
         area = keypad.area
@@ -802,7 +802,7 @@ class Vantage():
         """Formats and sends the requested command to the Vantage controller."""
 #    out_cmd = ",".join(
 #        (cmd, str(vid)) + tuple((str(x) for x in args)))
-        out_cmd = str(vid) + " " + " ".join(args)
+        out_cmd = str(vid) + " " + " ".join(str(a) for a in args)
         self._conn.send_ascii_nl(op + " " + out_cmd)
 
     # TODO: could confirm that this variable exists in the XML we download
@@ -1090,7 +1090,7 @@ class Output(VantageEntity):
         self._color_control_vid = cc_vid
         self._dmx_color = dmx_color
         self._query_waiters = _RequestHelper()
-        self._ramp_sec = [0, 0] # up, down
+        self._ramp_sec = [0, 0, 0] # up, down, color
         self._vantage.register_id(Output.CMD_TYPE,
                                   "STATUS" if dmx_color else None,
                                   self)
@@ -1199,9 +1199,12 @@ class Output(VantageEntity):
         """Sets the new output level."""
         if self._level == new_level:
             return
-#    self._vantage.send(Vantage.OP_EXECUTE, Output.CMD_TYPE, self._vid,
-#        Output.ACTION_ZONE_LEVEL, "%.2f" % new_level)
-        self._vantage.send("LOAD", self._vid, str(new_level))
+
+        if new_level == 0:
+            ramp_sec = self._ramp_sec[1]
+        else:
+            ramp_sec = self._ramp_sec[0]
+        self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
         self._level = new_level
 
     @property
@@ -1264,8 +1267,8 @@ class Output(VantageEntity):
             _LOGGER.info("Ignoring call to setter for color_temp of dmx_color light %d",
                          self._vid)
         else:
-            self._vantage.send("LOAD", self._color_control_vid,
-                               str(kelvin_to_level(new_color_temp)))
+            self._vantage.send("RAMPLOAD", self._color_control_vid,
+                               kelvin_to_level(new_color_temp), self._ramp_sec[2])
         self._color_temp = new_color_temp
 
 ## At some later date, we may want to also specify fade and delay times
@@ -1293,9 +1296,9 @@ class Output(VantageEntity):
         """Returns a boolean of whether or not the output is dimmable."""
         return self._load_type.lower().find("non-dim") == -1
 
-    def set_ramp_sec(self, up, down):
+    def set_ramp_sec(self, up, down, color):
         """Set the ramp speed for load changes, in seconds."""
-        self._ramp_sec = [up, down]
+        self._ramp_sec = [up, down, color]
 
     def get_ramp_sec(self):
         """Return the current ramp speed settings."""
