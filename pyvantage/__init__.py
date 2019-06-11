@@ -20,7 +20,14 @@ Then the component/vantage.py and its require line will work.
 
 __Author__ = "Greg J. Badros"
 __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
-# Dima Zavin wrote pylutron on which this was originally heavily based
+
+## TODO:
+## Handle OmniSensor elements:
+##     <Model>Temperature</Model> using getsensor (for temperature in celsius)
+##     <Model>Power</Model> using getpower (for power in watts)
+##     <Model>Current</Model> using getcurrent (for current in amps)
+
+
 
 import logging
 import telnetlib
@@ -93,7 +100,7 @@ class VantageConnection(threading.Thread):
         self._cmd_port = cmd_port
         self._telnet = None
         self._connected = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._connect_cond = threading.Condition(lock=self._lock)
         self._recv_cb = recv_callback
         self._done = False
@@ -124,7 +131,15 @@ class VantageConnection(threading.Thread):
     def _do_login(self):
         """Executes the login procedure (telnet) as well as setting up some
         connection defaults like turning off the prompt, etc."""
-        self._telnet = telnetlib.Telnet(self._host, self._cmd_port)
+        while True:
+            try:
+                self._telnet = telnetlib.Telnet(self._host, self._cmd_port)
+                break
+            except:
+                _LOGGER.warning("Could not connect to %s:%d, retrying after 3 sec",
+                                self._host, self._cmd_port)
+                time.sleep(3)
+                continue
         self.send_ascii_nl("LOGIN " + self._user + " " + self._password)
         self._telnet.read_until(b'\r\n')
         self.send_ascii_nl("STATUS LOAD")
@@ -148,11 +163,7 @@ class VantageConnection(threading.Thread):
         with self._lock:
             if not self._connected:
                 _LOGGER.info("Connecting to %s", self._host)
-                self._lock.release()
-                try:
-                    self._do_login()
-                finally:
-                    self._lock.acquire()
+                self._do_login()
                 self._connected = True
                 self._connect_cond.notify_all()
                 _LOGGER.info("Connected")
@@ -194,6 +205,7 @@ class VantageXmlDbParser():
         self.tasks = []
         self.buttons = []
         self.keypads = []
+        self.sensors = []
         self.load_groups = []
         self.vid_to_area = {}
         self.vid_to_load = {}
@@ -201,6 +213,7 @@ class VantageXmlDbParser():
         self.vid_to_button = {}
         self.vid_to_variable = {}
         self.vid_to_task = {}
+        self.vid_to_sensor = {}
         self.name_to_task = {}
         self.vid_to_shade = {}
         self._name_area_to_vid = {}
@@ -281,6 +294,14 @@ class VantageXmlDbParser():
                 self.vid_to_area[b.area].add_button(b)
                 self.buttons.append(b)
 
+        drycontacts = root.findall(".//Objects//DryContact[@VID]")
+        for dc_xml in drycontacts:
+            dc = self._parse_drycontact(dc_xml)
+            if not dc:
+                continue
+            _LOGGER.info("dc = %s", b)
+            self.vid_to_button[dc.vid] = dc
+
         variables = root.findall(".//Objects//GMem[@VID]")
         for v in variables:
             var = self._parse_variable(v)
@@ -288,6 +309,14 @@ class VantageXmlDbParser():
             self.vid_to_variable[var.vid] = var
             # N.B. variables have categories, not areas, so no add to area
             self.variables.append(var)
+
+        omnisensors = root.findall(".//Objects//OmniSensor[@VID]")
+        for s in omnisensors:
+            sensor = self._parse_omnisensor(s)
+            _LOGGER.info("sensor = %s", sensor)
+            self.vid_to_sensor[sensor.vid] = sensor
+            # N.B. variables have categories, not areas, so no add to area
+            self.sensors.append(sensor)
 
         tasks = root.findall(".//Objects//Task[@VID]")
         for t in tasks:
@@ -335,10 +364,18 @@ class VantageXmlDbParser():
         return area
 
     def _parse_variable(self, var_xml):
-        """Parses a variable tag."""
+        """Parses a variable (GMem) tag."""
         var = Variable(self._vantage,
                        name=var_xml.find('Name').text,
                        vid=int(var_xml.get('VID')))
+        return var
+
+    def _parse_omnisensor(self, sensor_xml):
+        """Parses an OmniSensor tag."""
+        var = OmniSensor(self._vantage,
+                         name=sensor_xml.find('Name').text,
+                         type=sensor_xml.find('Model').text.lower(),
+                         vid=int(sensor_xml.get('VID')))
         return var
 
     def _parse_shade(self, shade_xml):
@@ -506,19 +543,37 @@ class VantageXmlDbParser():
                     vid=int(task_xml.get('VID')))
         return task
 
+    def _parse_drycontact(self, dc_xml):
+        """Parses a button device that part of a keypad."""
+        vid = int(dc_xml.get('VID'))
+        name = dc_xml.find('Name').text + ' [C]'
+        parent = dc_xml.find('Parent')
+        parent_vid = int(parent.text)
+        desc = False  # false for description means drycontact
+        area = -1 # TODO could try to get area for this
+        num = 0
+        keypad = None
+        _LOGGER.info("Found DryContact with vid = %d", vid)
+        # Ugh, this is awful -- three different ways of representing bad-value
+        button = Button(self._vantage, name, -1, vid, 0, parent_vid, None, False)
+        return button
+
+
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
         vid = int(button_xml.get('VID'))
         name = button_xml.find('Name').text + ' [B]'
+        # no Text1 sub-element on DryContact
+        parent = button_xml.find('Parent')
+        parent_vid = int(parent.text)
         text1 = button_xml.find('Text1').text
         text2 = button_xml.find('Text2').text
         desc = _desc_from_t1t2(text1, text2)
-        parent = button_xml.find('Parent')
-        parent_vid = int(parent.text)
         num = int(parent.get('Position'))
-        keypad = self._vantage._ids['KEYPAD'].get(parent_vid, None)
+        keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
         if keypad is None:
-            _LOGGER.warning("Could not find parent vid = %d for button vid = %d (leaving button out)", parent_vid, vid)
+            _LOGGER.warning("Could not find parent vid = %d for button vid = %d (leaving button out)",
+                            parent_vid, vid)
             return None
         area = keypad.area
         button = Button(self._vantage, name, area, vid, num, parent_vid, keypad, desc)
@@ -580,9 +635,16 @@ class Vantage():
         self._vid_to_variable = {}  # copied out from the parser
         self._vid_to_task = {}  # copied out from the parser
         self._vid_to_shade = {}  # copied out from the parser
+        self._vid_to_sensor = {}  # copied out from the parser
+        self._name_to_task = {} # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
                         'GETBLIND', 'BLIND', 'INVOKE']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
+        self.outputs = None
+        self.variables = None
+        self.tasks = None
+        self.buttons = None
+        self.keypads = None
 
     def subscribe(self, obj, handler):
         """Subscribes to status updates of the requested object.
@@ -720,8 +782,9 @@ class Vantage():
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
+        """Call handle_update for the obj and for subscribers."""
         handled = obj.handle_update(args)
-        # Now notify anyone who cares that device  may have changed
+        # Now notify anyone who cares that device may have changed
         if handled and handled in self._subscribers:
             self._subscribers[handled](handled)
 
@@ -868,6 +931,7 @@ class Vantage():
         self._vid_to_area = parser.vid_to_area
         self._vid_to_shade = parser.vid_to_shade
         self._vid_to_task = parser.vid_to_task
+        self._vid_to_sensor = parser.vid_to_sensor
         self._name_to_task = parser.name_to_task
         self._name = parser.project_name
 
@@ -992,7 +1056,7 @@ class VantageEntity():
         return None
 
     @property
-    def type(self):
+    def kind(self):
         """The type of object (for units in hass)."""
         return None
 
@@ -1026,6 +1090,7 @@ class Output(VantageEntity):
         self._color_control_vid = cc_vid
         self._dmx_color = dmx_color
         self._query_waiters = _RequestHelper()
+        self._ramp_sec = [0, 0] # up, down
         self._vantage.register_id(Output.CMD_TYPE,
                                   "STATUS" if dmx_color else None,
                                   self)
@@ -1219,7 +1284,7 @@ class Output(VantageEntity):
         self._color_control_vid = new_ccvid
 
     @property
-    def type(self):
+    def kind(self):
         """Returns the output type. At present AUTO_DETECT or NON_DIM."""
         return self._output_type
 
@@ -1227,6 +1292,14 @@ class Output(VantageEntity):
     def is_dimmable(self):
         """Returns a boolean of whether or not the output is dimmable."""
         return self._load_type.lower().find("non-dim") == -1
+
+    def set_ramp_sec(self, up, down):
+        """Set the ramp speed for load changes, in seconds."""
+        self._ramp_sec = [up, down]
+
+    def get_ramp_sec(self):
+        """Return the current ramp speed settings."""
+        return self._ramp_sec
 
     def is_output(self):
         return True
@@ -1249,7 +1322,7 @@ class Button(VantageEntity):
 
     def __str__(self):
         """Pretty printed string value of the Button object."""
-        return 'Button name: "%s" num: %d area: %d vid: %d parent: %d [%s]' % (
+        return 'Button name: "%s" num: %d area: %s vid: %d parent: %d [%s]' % (
             self._name, self._num, self._area, self._vid, self._parent, self._desc)
 
     def __repr__(self):
@@ -1264,8 +1337,10 @@ class Button(VantageEntity):
         return self._value
 
     @property
-    def type(self):
+    def kind(self):
         """The type of object (for units in hass)."""
+        if self._desc is False:
+            return 'contact'
         return 'button'
 
     @property
@@ -1279,9 +1354,10 @@ class Button(VantageEntity):
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
         self._value = action
-        # this transfers control to Keypad.handle_update(...)
-        self._vantage.handle_update_and_notify(self._keypad,
-                                               [self._num, self._name, self._value])
+        if self._keypad:
+            # this transfers control to Keypad.handle_update(...)
+            self._vantage.handle_update_and_notify(self._keypad,
+                                                   [self._num, self._name, self._value])
         return self
 
 class LoadGroup(Output):
@@ -1332,7 +1408,7 @@ class Keypad(VantageEntity):
         return tuple(button for button in self._buttons)
 
     @property
-    def type(self):
+    def kind(self):
         """The type of object (for units in hass)."""
         return 'keypad'
 
@@ -1342,7 +1418,8 @@ class Keypad(VantageEntity):
         return self._value
 
     def handle_update(self, args):
-        """The callback invoked by a button's handle_update to set keypad value to the name of button."""
+        """The callback invoked by a button's handle_update to
+        set keypad value to the name of button."""
         _LOGGER.debug("Keypad %d(%s): %s",
                       self._vid, self._name, args)
         self._value = args[0]
@@ -1440,7 +1517,7 @@ class Area():
     def add_task(self, t):
         """Adds a task object that's part of this area, only used during
         initial parsing."""
-        self._tasks.append(v)
+        self._tasks.append(t)
 
     @property
     def name(self):
@@ -1496,14 +1573,51 @@ class Variable(VantageEntity):
         return self._value
 
     @property
-    def type(self):
+    def kind(self):
         """The type of object (for units in hass)."""
         return 'variable'
 
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
         value = int(args[0])
-        _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, str(value))
+        _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, value)
+        self._value = value
+        return self
+
+
+class OmniSensor(VantageEntity):
+    """An omnisensor in the vantage system.
+
+    """
+    CMD_TYPE = 'SENSOR'  #OmniSensor in the XML config
+
+    def __init__(self, vantage, name, kind, vid):
+        """Initializes the sensor object."""
+        super(OmniSensor, self).__init__(vantage, name, None, vid)
+        self._value = None
+        self._kind = kind
+        self._vantage.register_id(self.CMD_TYPE, None, self)
+
+    def __str__(self):
+        """Returns pretty-printed representation of this object."""
+        return 'Sensor name (%s): "%s", vid: %d, value: %s' % (
+            self._name, self._kind, self._vid, self._value)
+
+    @property
+    def value(self):
+        """The value of the variable."""
+        return self._value
+
+    @property
+    def kind(self):
+        """The type of object (for units in hass)."""
+        return self._kind
+
+    def handle_update(self, args):
+        """The callback invoked by the main event loop if there's a new value for the variable."""
+        value = int(args[0])
+        _LOGGER.info("Setting  sensor (%s) %s (%d) to %s",
+                     self._name, self._kind, self._vid, value)
         self._value = value
         return self
 
@@ -1525,7 +1639,7 @@ class Shade(VantageEntity):
         self._query_waiters = _RequestHelper()
 
     @property
-    def type(self):
+    def kind(self):
         """Returns the output type. At present AUTO_DETECT or NON_DIM."""
         return self._load_type
 
