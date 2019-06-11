@@ -989,7 +989,7 @@ class _RequestHelper():
             ev.set()
 
 
-class VantageEntity():
+class VantageEntity:
     """Base class for all the Vantage objects we'd like to manage. Just holds basic
     common info we'd rather not manage repeatedly."""
 
