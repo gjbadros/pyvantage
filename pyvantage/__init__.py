@@ -299,8 +299,10 @@ class VantageXmlDbParser():
             dc = self._parse_drycontact(dc_xml)
             if not dc:
                 continue
-            _LOGGER.info("dc = %s", b)
+            _LOGGER.info("dc = %s", dc)
             self.vid_to_button[dc.vid] = dc
+            self.buttons.append(dc)
+
 
         variables = root.findall(".//Objects//GMem[@VID]")
         for v in variables:
@@ -1113,9 +1115,6 @@ class Output(VantageEntity):
                     ("ctemp " if self.support_color_temp else "") +
                     ("color " if self.support_color else "")})
 
-    def set_ramp_sec(self, up, down, color):
-        pass
-
     @property
     def simple_name(self):
         """Return a simple pretty-printed string for this object."""
@@ -1359,11 +1358,21 @@ class Button(VantageEntity):
         action = args[0]
         _LOGGER.debug("Button %d(%s): action=%s params=%s",
                       self._vid, self._name, action, args[1:])
-        self._value = action
-        if self._keypad:
+        if self._keypad: # it's a button
+            self._value = action
             # this transfers control to Keypad.handle_update(...)
             self._vantage.handle_update_and_notify(self._keypad,
                                                    [self._num, self._name, self._value])
+        else: #it's a drycontact
+            if action == 'PRESS':
+                self._value = 'Normal'
+            elif action == 'RELEASE':
+                self._value = 'Violated'
+            else:
+                _LOGGER.warning("unexpected action for drycontact button %s = %s",
+                                self, action)
+                self._value = action
+
         return self
 
 class LoadGroup(Output):
