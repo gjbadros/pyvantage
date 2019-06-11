@@ -1364,10 +1364,11 @@ class Button(VantageEntity):
             self._vantage.handle_update_and_notify(self._keypad,
                                                    [self._num, self._name, self._value])
         else: #it's a drycontact
+            # TODO: support per-vid flipping/control of these rewrites
             if action == 'PRESS':
-                self._value = 'Normal'
-            elif action == 'RELEASE':
                 self._value = 'Violated'
+            elif action == 'RELEASE':
+                self._value = 'Normal'
             else:
                 _LOGGER.warning("unexpected action for drycontact button %s = %s",
                                 self, action)
