@@ -1113,6 +1113,9 @@ class Output(VantageEntity):
                     ("ctemp " if self.support_color_temp else "") +
                     ("color " if self.support_color else "")})
 
+    def set_ramp_sec(self, up, down, color):
+        pass
+
     @property
     def simple_name(self):
         """Return a simple pretty-printed string for this object."""
