@@ -126,7 +126,7 @@ class VantageConnection(threading.Thread):
             self._telnet.write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected")
-            self._disconnect()
+            raise
 
     def _do_login(self):
         """Executes the login procedure (telnet) as well as setting up some
@@ -177,6 +177,10 @@ class VantageConnection(threading.Thread):
                 line = self._telnet.read_until(b"\n")
             except EOFError:
                 _LOGGER.warning("run got EOFError")
+                self._disconnect()
+                continue
+            except BrokenPipeError:
+                _LOGGER.warning("run got BrokenPipeError")
                 self._disconnect()
                 continue
             self._recv_cb(line.decode('ascii').rstrip())
@@ -320,6 +324,14 @@ class VantageXmlDbParser():
             # N.B. variables have categories, not areas, so no add to area
             self.sensors.append(sensor)
 
+        lightsensors = root.findall(".//Objects//LightSensor[@VID]")
+        for s in lightsensors:
+            sensor = self._parse_lightsensor(s)
+            _LOGGER.info("sensor = %s", sensor)
+            self.vid_to_sensor[sensor.vid] = sensor
+            # N.B. variables have categories, not areas, so no add to area
+            self.sensors.append(sensor)
+
         tasks = root.findall(".//Objects//Task[@VID]")
         for t in tasks:
             task = self._parse_task(t)
@@ -379,6 +391,16 @@ class VantageXmlDbParser():
                          kind=sensor_xml.find('Model').text.lower(),
                          vid=int(sensor_xml.get('VID')))
         return var
+
+    def _parse_lightsensor(self, sensor_xml):
+        """Parses a LightSensor object."""
+        value_range = (int(sensor_xml.find('RangeLow').text),
+                       int(sensor_xml.find('RangeHigh').text))
+        return LightSensor(self._vantage,
+                           name=sensor_xml.find('Name').text,
+                           area=int(sensor_xml.find('Area').text),
+                           value_range=value_range,
+                           vid=int(sensor_xml.get('VID')))
 
     def _parse_shade(self, shade_xml):
         """Parses a MechoShade.IQ2_Shade_Node_CHILD or QMotion.QIS_Channel_CHILD (shade) tag."""
@@ -582,18 +604,6 @@ class VantageXmlDbParser():
         keypad.add_button(button)
         return button
 
-    def _parse_motion_sensor(self, sensor_xml):
-        """Parses a motion sensor object.
-
-        TODO: We don't actually do anything with these yet. There's a lot of info
-        that needs to be managed to do this right. We'd have to manage the occupancy
-        groups, what's assigned to them, and when they go (un)occupied. We'll handle
-        this later.
-        """
-        return MotionSensor(self._vantage,
-                            name=sensor_xml.get('Name'),
-                            area=None,
-                            vid=int(sensor_xml.get('VID')))
 
 # Connect to port 2001 and write
 # "<IBackup><GetFile><call>Backup\\Project.dc</call></GetFile></IBackup>"
@@ -640,7 +650,7 @@ class Vantage():
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {} # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
-                        'GETBLIND', 'BLIND', 'INVOKE']
+                        'GETBLIND', 'GETLIGHT', 'GETPOWER', 'BLIND', 'INVOKE']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -758,8 +768,8 @@ class Vantage():
             return
         if line[0] == 'R' and cmd_type in ('STATUS', 'INVOKE'):
             return
-        if cmd_type == 'GETLOAD':
-            cmd_type = 'LOAD'
+        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETLIGHT'):
+            cmd_type = cmd_type[3:]
         elif cmd_type == 'GETBLIND':
             return
         elif cmd_type == 'TASK':
@@ -780,7 +790,8 @@ class Vantage():
                 return
             obj = ids[vid]
             # First let the device update itself
-            if typ == 'S' or (typ == 'R' and cmd_type == 'LOAD'):
+            if (typ == 'S' or 
+                (typ == 'R' and cmd_type in ('LOAD', 'POWER', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
@@ -997,6 +1008,7 @@ class VantageEntity:
 
     def __init__(self, vantage, name, area, vid):
         """Initializes the base class with common, basic data."""
+        assert name is not None
         self._vantage = vantage
         self._name = name
         self._area = area
@@ -1070,6 +1082,123 @@ class VantageEntity:
     def is_output(self):
         """Return true iff this is an output."""
         return False
+
+
+class Area():
+    """An area (i.e. a room) that contains devices/outputs/etc."""
+    def __init__(self, vantage, name, parent, vid, note):
+        self._vantage = vantage
+        self._name = name
+        self._vid = vid
+        self._note = note
+        self._parent = parent
+        self._outputs = []
+        self._keypads = []
+        self._buttons = []
+        self._sensors = []
+        self._variables = []
+        self._tasks = []
+
+    def __str__(self):
+        """Returns a pretty-printed string for this object."""
+        return 'Area name: "%s", vid: %d, parent_vid: %d' % (
+            self._name, self._vid, self._parent)
+
+    def add_output(self, output):
+        """Adds an output object that's part of this area, only used during
+        initial parsing."""
+        self._outputs.append(output)
+
+    def add_keypad(self, keypad):
+        """Adds a keypad object that's part of this area, only used during
+        initial parsing."""
+        self._keypads.append(keypad)
+
+    def add_button(self, button):
+        """Adds a button object that's part of this area, only used during
+        initial parsing."""
+        self._buttons.append(button)
+
+    def add_sensor(self, sensor):
+        """Adds a motion sensor object that's part of this area, only used during
+        initial parsing."""
+        self._sensors.append(sensor)
+
+    def add_variable(self, v):
+        """Adds a variable object that's part of this area, only used during
+        initial parsing."""
+        self._variables.append(v)
+
+    def add_task(self, t):
+        """Adds a task object that's part of this area, only used during
+        initial parsing."""
+        self._tasks.append(t)
+
+    @property
+    def name(self):
+        """Returns the name of this area."""
+        return self._name
+
+    @property
+    def parent(self):
+        """Returns the vid of the parent area."""
+        return self._parent
+
+    @property
+    def vid(self):
+        """The integration id of the area."""
+        return self._vid
+
+    @property
+    def outputs(self):
+        """Return the tuple of the Outputs from this area."""
+        return tuple(output for output in self._outputs)
+
+    @property
+    def keypads(self):
+        """Return the tuple of the Keypads from this area."""
+        return tuple(keypad for keypad in self._keypads)
+
+    @property
+    def sensors(self):
+        """Return the tuple of the MotionSensors from this area."""
+        return tuple(sensor for sensor in self._sensors)
+
+
+class Variable(VantageEntity):
+    """A variable in the vantage system. See set_variable_vid.
+
+    """
+    CMD_TYPE = 'VARIABLE'  #GMem in the XML config
+
+    def __init__(self, vantage, name, vid):
+        """Initializes the variable object."""
+        super(Variable, self).__init__(vantage, name, None, vid)
+        self._value = None
+        self._vantage.register_id(Variable.CMD_TYPE, None, self)
+
+    def __str__(self):
+        """Returns pretty-printed representation of this object."""
+        return 'Variable name: "%s", vid: %d, value: %s' % (
+            self._name, self._vid, self._value)
+
+    @property
+    def value(self):
+        """The value of the variable."""
+        return self._value
+
+    @property
+    def kind(self):
+        """The type of object (for units in hass)."""
+        return 'variable'
+
+    def handle_update(self, args):
+        """The callback invoked by the main event loop if there's a new value for the variable."""
+        value = int(args[0])
+        _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, value)
+        self._value = value
+        return self
+
 
 class Output(VantageEntity):
     """This is the output entity in Vantage universe. This generally refers to a
@@ -1472,152 +1601,17 @@ class Task(VantageEntity):
         return self
 
 
-class MotionSensor():
-    """Placeholder class for the motion sensor device.
+class PollingSensor(VantageEntity):
+    """Base class for LightSensor and OmniSensor.
+    These sensors do not report values via STATUS commands
+    but instead need to be polled."""
 
-    TODO: Actually implement this.
-    """
     def __init__(self, vantage, name, area, vid):
-        """Initializes the motion sensor object."""
-        self._vantage = vantage
-        self._name = name
-        self._area = area
-        self._vid = vid
-
-
-class Area():
-    """An area (i.e. a room) that contains devices/outputs/etc."""
-    def __init__(self, vantage, name, parent, vid, note):
-        self._vantage = vantage
-        self._name = name
-        self._vid = vid
-        self._note = note
-        self._parent = parent
-        self._outputs = []
-        self._keypads = []
-        self._buttons = []
-        self._sensors = []
-        self._variables = []
-        self._tasks = []
-
-    def __str__(self):
-        """Returns a pretty-printed string for this object."""
-        return 'Area name: "%s", vid: %d, parent_vid: %d' % (
-            self._name, self._vid, self._parent)
-
-    def add_output(self, output):
-        """Adds an output object that's part of this area, only used during
-        initial parsing."""
-        self._outputs.append(output)
-
-    def add_keypad(self, keypad):
-        """Adds a keypad object that's part of this area, only used during
-        initial parsing."""
-        self._keypads.append(keypad)
-
-    def add_button(self, button):
-        """Adds a button object that's part of this area, only used during
-        initial parsing."""
-        self._buttons.append(button)
-
-    def add_sensor(self, sensor):
-        """Adds a motion sensor object that's part of this area, only used during
-        initial parsing."""
-        self._sensors.append(sensor)
-
-    def add_variable(self, v):
-        """Adds a variable object that's part of this area, only used during
-        initial parsing."""
-        self._variables.append(v)
-
-    def add_task(self, t):
-        """Adds a task object that's part of this area, only used during
-        initial parsing."""
-        self._tasks.append(t)
-
-    @property
-    def name(self):
-        """Returns the name of this area."""
-        return self._name
-
-    @property
-    def parent(self):
-        """Returns the vid of the parent area."""
-        return self._parent
-
-    @property
-    def vid(self):
-        """The integration id of the area."""
-        return self._vid
-
-    @property
-    def outputs(self):
-        """Return the tuple of the Outputs from this area."""
-        return tuple(output for output in self._outputs)
-
-    @property
-    def keypads(self):
-        """Return the tuple of the Keypads from this area."""
-        return tuple(keypad for keypad in self._keypads)
-
-    @property
-    def sensors(self):
-        """Return the tuple of the MotionSensors from this area."""
-        return tuple(sensor for sensor in self._sensors)
-
-
-class Variable(VantageEntity):
-    """A variable in the vantage system. See set_variable_vid.
-
-    """
-    CMD_TYPE = 'VARIABLE'  #GMem in the XML config
-
-    def __init__(self, vantage, name, vid):
-        """Initializes the variable object."""
-        super(Variable, self).__init__(vantage, name, None, vid)
+        """Init base fields"""
+        assert name is not None
+        super(PollingSensor, self).__init__(vantage, name, area, vid)
         self._value = None
-        self._vantage.register_id(Variable.CMD_TYPE, None, self)
-
-    def __str__(self):
-        """Returns pretty-printed representation of this object."""
-        return 'Variable name: "%s", vid: %d, value: %s' % (
-            self._name, self._vid, self._value)
-
-    @property
-    def value(self):
-        """The value of the variable."""
-        return self._value
-
-    @property
-    def kind(self):
-        """The type of object (for units in hass)."""
-        return 'variable'
-
-    def handle_update(self, args):
-        """The callback invoked by the main event loop if there's a new value for the variable."""
-        value = int(args[0])
-        _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, value)
-        self._value = value
-        return self
-
-
-class OmniSensor(VantageEntity):
-    """An omnisensor in the vantage system.
-
-    """
-    CMD_TYPE = 'SENSOR'  #OmniSensor in the XML config
-
-    def __init__(self, vantage, name, kind, vid):
-        """Initializes the sensor object."""
-        super(OmniSensor, self).__init__(vantage, name, None, vid)
-        self._value = None
-        self._kind = kind
-        self._vantage.register_id(self.CMD_TYPE, None, self)
-
-    def __str__(self):
-        """Returns pretty-printed representation of this object."""
-        return 'Sensor name (%s): "%s", vid: %d, value: %s' % (
-            self._name, self._kind, self._vid, self._value)
+        self._kind = None
 
     @property
     def value(self):
@@ -1629,14 +1623,51 @@ class OmniSensor(VantageEntity):
         """The type of object (for units in hass)."""
         return self._kind
 
+    def update(self):
+        """Request an update from the device."""
+        self._vantage.send("GET"+self._kind.upper(), self._vid)
+
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
-        value = int(args[0])
-        _LOGGER.info("Setting  sensor (%s) %s (%d) to %s",
+        value = float(args[0])
+        _LOGGER.info("Setting sensor (%s) %s (%d) to %s",
                      self._name, self._kind, self._vid, value)
         self._value = value
         return self
 
+
+class LightSensor(PollingSensor):
+    """Represent LightSensor devices."""
+    CMD_TYPE = 'LIGHT'
+
+    def __init__(self, vantage, name, area, value_range, vid):
+        """Initializes the motion sensor object."""
+        assert name is not None
+        super(LightSensor, self).__init__(vantage, name, area, vid)
+        self._kind = 'light'
+        self.value_range = value_range
+        self._vantage.register_id(self.CMD_TYPE, None, self)
+        
+    def __str__(self):
+        """Returns pretty-printed representation of this object."""
+        return 'LightSensor name (%s): "%s", vid: %d, value: %s' % (
+            self._name, self._kind, self._vid, self._value)
+
+
+class OmniSensor(PollingSensor):
+    """An omnisensor in the vantage system."""
+    CMD_TYPE = 'POWER'  #OmniSensor in the XML config
+
+    def __init__(self, vantage, name, kind, vid):
+        """Initializes the sensor object."""
+        super(OmniSensor, self).__init__(vantage, name, None, vid)
+        self._kind = kind
+        self._vantage.register_id(self.CMD_TYPE, None, self)
+
+    def __str__(self):
+        """Returns pretty-printed representation of this object."""
+        return 'OmniSensor name (%s): "%s", vid: %d, value: %s' % (
+            self._name, self._kind, self._vid, self._value)
 
 
 class Shade(VantageEntity):

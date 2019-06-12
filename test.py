@@ -9,6 +9,7 @@
 
 import argparse
 import logging
+import time
 
 from pyvantage import Vantage
 
@@ -62,7 +63,14 @@ def various_tests(v):
     print(v.outputs)
     sh = v._vid_to_shade[3036]
     print("shade = ", sh)
-    
+    ls = v._vid_to_sensor[3371] # light sensor
+    ls.update()
+    los = v._vid_to_sensor[429] # power sensor
+    los.update()
+    time.sleep(2)
+    print("ls = " + str(ls.value))
+    print("los = " + str(los.value))
+
 
 def main():
     """Connect to a vantage server, parse config, and monitor events."""
@@ -85,7 +93,6 @@ def main():
     if args.run_tests:
         various_tests(v)
     
-    import time
     time.sleep(args.sleep_for)
     
     if args.dump_outputs:
