@@ -386,6 +386,9 @@ class VantageXmlDbParser():
 
     def _parse_omnisensor(self, sensor_xml):
         """Parses an OmniSensor tag."""
+        kind = sensor_xml.find('Model').text.lower()
+        if kind == 'temperature':
+            kind = 'temp'
         var = OmniSensor(self._vantage,
                          name=sensor_xml.find('Name').text,
                          kind=sensor_xml.find('Model').text.lower(),
@@ -630,7 +633,7 @@ class Vantage():
         self._name_to_task = {} # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
                         'GETBLIND', 'BLIND', 'INVOKE',
-                        'GETLIGHT', 'GETPOWER', 'GETCURRENT', 'GETTEMPERATURE' ]
+                        'GETLIGHT', 'GETPOWER', 'GETCURRENT', 'GETTEMP' ]
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -748,7 +751,7 @@ class Vantage():
             return
         if line[0] == 'R' and cmd_type in ('STATUS', 'INVOKE'):
             return
-        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT', 'GETTEMPERATURE', 'GETLIGHT'):
+        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT', 'GETTEMP', 'GETLIGHT'):
             cmd_type = cmd_type[3:]  # strip "GET" from front
         elif cmd_type == 'GETBLIND':
             return
@@ -772,7 +775,7 @@ class Vantage():
             # First let the device update itself
             if (typ == 'S' or
                     (typ == 'R' and
-                     cmd_type in ('LOAD', 'POWER', 'CURRENT', 'TEMPERATURE', 'LIGHT'))):
+                     cmd_type in ('LOAD', 'POWER', 'CURRENT', 'TEMP', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
