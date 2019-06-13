@@ -629,7 +629,8 @@ class Vantage():
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {} # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
-                        'GETBLIND', 'GETLIGHT', 'GETPOWER', 'BLIND', 'INVOKE']
+                        'GETBLIND', 'BLIND', 'INVOKE',
+                        'GETLIGHT', 'GETPOWER', 'GETCURRENT', 'GETTEMPERATURE' ]
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -747,8 +748,8 @@ class Vantage():
             return
         if line[0] == 'R' and cmd_type in ('STATUS', 'INVOKE'):
             return
-        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETLIGHT'):
-            cmd_type = cmd_type[3:]
+        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT', 'GETTEMPERATURE', 'GETLIGHT'):
+            cmd_type = cmd_type[3:]  # strip "GET" from front
         elif cmd_type == 'GETBLIND':
             return
         elif cmd_type == 'TASK':
@@ -770,7 +771,8 @@ class Vantage():
             obj = ids[vid]
             # First let the device update itself
             if (typ == 'S' or
-                    (typ == 'R' and cmd_type in ('LOAD', 'POWER', 'LIGHT'))):
+                    (typ == 'R' and
+                     cmd_type in ('LOAD', 'POWER', 'CURRENT', 'TEMPERATURE', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
@@ -1276,9 +1278,6 @@ class Output(VantageEntity):
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
         output. For pure on/off loads the result is either 0.0 or 100.0."""
-#    self._vantage.send(Vantage.OP_QUERY, Output.CMD_TYPE, self._vid,
-#            Output.ACTION_ZONE_LEVEL)
-#    if self.support_color_temp or self.support_color:
         if self.support_color and not self._addedstatus:
             self._vantage.send("ADDSTATUS", self._vid)
             self._addedstatus = True
@@ -1642,13 +1641,13 @@ class LightSensor(PollingSensor):
 
 class OmniSensor(PollingSensor):
     """An omnisensor in the vantage system."""
-    CMD_TYPE = 'POWER'  #OmniSensor in the XML config
+    CMD_TYPE = 'VARIOUS'  #OmniSensor in the XML config
 
     def __init__(self, vantage, name, kind, vid):
         """Initializes the sensor object."""
         super(OmniSensor, self).__init__(vantage, name, None, vid)
         self._kind = kind
-        self._vantage.register_id(self.CMD_TYPE, None, self)
+        self._vantage.register_id(self._kind.upper(), None, self)
 
     def __str__(self):
         """Returns pretty-printed representation of this object."""
