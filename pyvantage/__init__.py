@@ -394,8 +394,8 @@ class VantageXmlDbParser():
 
     def _parse_lightsensor(self, sensor_xml):
         """Parses a LightSensor object."""
-        value_range = (int(sensor_xml.find('RangeLow').text),
-                       int(sensor_xml.find('RangeHigh').text))
+        value_range = (float(sensor_xml.find('RangeLow').text),
+                       float(sensor_xml.find('RangeHigh').text))
         return LightSensor(self._vantage,
                            name=sensor_xml.find('Name').text,
                            area=int(sensor_xml.find('Area').text),
@@ -1197,7 +1197,7 @@ class Variable(VantageEntity):
 
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
-        value = int(args[0])
+        value = float(args[0])
         _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, value)
         self._value = value
         return self
