@@ -790,8 +790,8 @@ class Vantage():
                 return
             obj = ids[vid]
             # First let the device update itself
-            if (typ == 'S' or 
-                (typ == 'R' and cmd_type in ('LOAD', 'POWER', 'LIGHT'))):
+            if (typ == 'S' or
+                    (typ == 'R' and cmd_type in ('LOAD', 'POWER', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
@@ -1014,6 +1014,9 @@ class VantageEntity:
         self._area = area
         self._vid = vid
         self._extra_info = {}
+
+    def needs_poll(self):
+        return False
 
     @property
     def name(self):
@@ -1613,6 +1616,9 @@ class PollingSensor(VantageEntity):
         self._value = None
         self._kind = None
 
+    def needs_poll(self):
+        return True
+
     @property
     def value(self):
         """The value of the variable."""
@@ -1647,7 +1653,7 @@ class LightSensor(PollingSensor):
         self._kind = 'light'
         self.value_range = value_range
         self._vantage.register_id(self.CMD_TYPE, None, self)
-        
+
     def __str__(self):
         """Returns pretty-printed representation of this object."""
         return 'LightSensor name (%s): "%s", vid: %d, value: %s' % (
