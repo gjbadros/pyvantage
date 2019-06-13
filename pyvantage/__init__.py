@@ -433,24 +433,6 @@ class VantageXmlDbParser():
         # TODO: find a better heuristic so that on/off lights still show up
         if load_type in ('High Voltage Relay', 'Low Voltage Relay'):
             output_type = 'RELAY'
-        if out_name == "NOT USED":
-            return None
-        # a RELAY load and a DIMLOAD load are software-paired together and
-        # a LoadGroup containing both should exist in vantage if it's supposed
-        # to show up in the Outputs available here (and in home assistant)
-        if out_name.endswith('DIMLOAD'):
-            output_type = 'SKIP ' + output_type
-        if out_name.startswith('Station Load '):
-            return None
-        if out_name.startswith('Color Load '):
-            return None
-
-        is_relay_area = False
-        if area_name.strip() == '0-10V RELAYS':
-            _LOGGER.info("Skipping %s because in 0-10V RELAYS area",
-                         out_name)
-            is_relay_area = True
-            output_type = 'SKIP ' + output_type
 
         if ' COLOR' in out_name and load_type != 'HID':
             _LOGGER.warning("Load %s [%d] might be color load but of type %s not HID",
@@ -502,9 +484,6 @@ class VantageXmlDbParser():
 
         if output_type == 'LIGHT':
             self._name_area_to_vid[(out_name, area_vid)] = vid
-# TODO: use this?
-#    if is_relay_area:
-#      return None
         output = Output(self._vantage,
                         name=out_name,
                         area=area_vid,
