@@ -387,8 +387,6 @@ class VantageXmlDbParser():
     def _parse_omnisensor(self, sensor_xml):
         """Parses an OmniSensor tag."""
         kind = sensor_xml.find('Model').text.lower()
-        if kind == 'temperature':
-            kind = 'sensor'
         var = OmniSensor(self._vantage,
                          name=sensor_xml.find('Name').text,
                          kind=kind,
