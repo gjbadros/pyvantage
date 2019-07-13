@@ -3,15 +3,15 @@
 from setuptools import setup, find_packages
 
 setup(
-    name = 'pyvantage',
-    version = '0.0.18',
-    license = 'MIT',
-    description = 'Python library for Vantage Controller, used for Home Assistant',
-    author = 'Greg J. Badros',
-    author_email = 'badros@gmail.com',
-    url = 'http://github.com/gjbadros/pyvantage',
+    name='pyvantage',
+    version='0.0.19',
+    license='MIT',
+    description='Python library for Vantage Controller, used for Home Assistant',
+    author='Greg J. Badros',
+    author_email='badros@gmail.com',
+    url='http://github.com/gjbadros/pyvantage',
     packages=find_packages(),
-    classifiers = [
+    classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',

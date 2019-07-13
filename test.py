@@ -43,7 +43,7 @@ def parse_args():
 def various_tests(v):
     """TODO: rewrite this to do something useful."""
     ll = v._vid_to_load[3496]
-    
+
     ll.level = 50
     print("ll = ", ll)
     print(ll.support_color_temp)
@@ -83,7 +83,7 @@ def main():
     name_mappings['basement'] = 'B'
     name_mappings['outside'] = 'OUT'
     name_mappings['0-10v relays'] = True # means to skip
-    
+
     args = parse_args()
 
     v = Vantage(args.host, args.user, args.password, None, None, 3001, 2001, name_mappings)
@@ -92,9 +92,9 @@ def main():
 
     if args.run_tests:
         various_tests(v)
-    
+
     time.sleep(args.sleep_for)
-    
+
     if args.dump_outputs:
         for output in v.outputs:
             area = v._vid_to_area[output.area]
@@ -106,8 +106,7 @@ def main():
             area = v._vid_to_area[b.area]
             print(b)
             print(area)
-    
+
 
 if __name__ == '__main__':
     main()
-                  

@@ -119,8 +119,9 @@ class VantageConnection(threading.Thread):
             self._connect_cond.wait_for(lambda: self._connected)
 
     # VantageConnection
-    def send_ascii_nl(self, cmd):
-        """Sends the specified command to the vantage controller."""
+    def _send_ascii_nl_locked(self, cmd):
+        """Sends the specified command to the vantage controller.
+        Assumes lock is held."""
         _LOGGER.info("Vantage send_ascii_nl: %s", cmd)
         try:
             self._telnet.write(cmd.encode('ascii') + b'\r\n')
@@ -128,7 +129,14 @@ class VantageConnection(threading.Thread):
             _LOGGER.warning("Vantage BrokenPipeError - disconnected")
             raise
 
-    def _do_login(self):
+    def send_ascii_nl(self, cmd):
+        """Sends the specified command to the lutron controller.
+
+        Must not hold self._lock"""
+        with self._lock:
+            self._send_ascii_nl_locked(cmd)
+
+    def _do_login_locked(self):
         """Executes the login procedure (telnet) as well as setting up some
         connection defaults like turning off the prompt, etc."""
         while True:
@@ -140,30 +148,29 @@ class VantageConnection(threading.Thread):
                                 self._host, self._cmd_port)
                 time.sleep(3)
                 continue
-        self.send_ascii_nl("LOGIN " + self._user + " " + self._password)
+        self._send_ascii_nl_locked("LOGIN " + self._user + " " + self._password)
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS LOAD")
+        self._send_ascii_nl_locked("STATUS LOAD")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS BLIND")
+        self._send_ascii_nl_locked("STATUS BLIND")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS BTN")
+        self._send_ascii_nl_locked("STATUS BTN")
         self._telnet.read_until(b'\r\n')
-        self.send_ascii_nl("STATUS VARIABLE")
+        self._send_ascii_nl_locked("STATUS VARIABLE")
         return True
 
-    def _disconnect(self):
-        with self._lock:
-            self._connected = False
-            self._connect_cond.notify_all()
-            self._telnet = None
-            _LOGGER.warning("Disconnected")
+    def _disconnect_locked(self):
+        self._connected = False
+        self._connect_cond.notify_all()
+        self._telnet = None
+        _LOGGER.warning("Disconnected")
 
     def _maybe_reconnect(self):
         """Reconnects to the controller if we have been previously disconnected."""
         with self._lock:
             if not self._connected:
                 _LOGGER.info("Connecting to %s", self._host)
-                self._do_login()
+                self._do_login_locked()
                 self._connected = True
                 self._connect_cond.notify_all()
                 _LOGGER.info("Connected")
@@ -177,11 +184,13 @@ class VantageConnection(threading.Thread):
                 line = self._telnet.read_until(b"\n")
             except EOFError:
                 _LOGGER.warning("run got EOFError")
-                self._disconnect()
+                with self._lock:
+                    self._disconnect_locked()
                 continue
             except BrokenPipeError:
                 _LOGGER.warning("run got BrokenPipeError")
-                self._disconnect()
+                with self._lock:
+                    self._disconnect_locked()
                 continue
             self._recv_cb(line.decode('ascii').rstrip())
 
@@ -633,13 +642,14 @@ class Vantage():
         self._name_to_task = {} # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE', 'TASK',
                         'GETBLIND', 'BLIND', 'INVOKE',
-                        'GETLIGHT', 'GETPOWER', 'GETCURRENT', 'GETSENSOR' ]
+                        'GETLIGHT', 'GETPOWER', 'GETCURRENT', 'GETSENSOR']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
         self.tasks = None
         self.buttons = None
         self.keypads = None
+        self.sensors = None
 
     def subscribe(self, obj, handler):
         """Subscribes to status updates of the requested object.
