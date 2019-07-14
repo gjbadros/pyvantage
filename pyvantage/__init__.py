@@ -460,8 +460,8 @@ class VantageXmlDbParser():
             if load_vid:
                 self._vid_to_colorvid[load_vid] = vid
                 _LOGGER.debug("Found colorvid = %d for load_vid %d (names %s and %s)"
-                             " in area %s (%d)",
-                             vid, load_vid, out_name, load_name, area_name, area_vid)
+                              " in area %s (%d)",
+                              vid, load_vid, out_name, load_name, area_name, area_vid)
                 self.vid_to_load[load_vid].color_control_vid = vid
             else:
                 # TODO: do not assume that the regular loads are handled before the COLOR loads
@@ -563,13 +563,13 @@ class VantageXmlDbParser():
         name = dc_xml.find('Name').text + ' [C]'
         parent = dc_xml.find('Parent')
         parent_vid = int(parent.text)
-        desc = False  # false for description means drycontact
         area = -1 # TODO could try to get area for this
         num = 0
         keypad = None
         _LOGGER.debug("Found DryContact with vid = %d", vid)
         # Ugh, this is awful -- three different ways of representing bad-value
-        button = Button(self._vantage, name, -1, vid, 0, parent_vid, None, False)
+        button = Button(self._vantage, name, area, vid, num,
+                        parent_vid, keypad, False)
         return button
 
 
