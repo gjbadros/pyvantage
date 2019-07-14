@@ -122,7 +122,7 @@ class VantageConnection(threading.Thread):
     def _send_ascii_nl_locked(self, cmd):
         """Sends the specified command to the vantage controller.
         Assumes lock is held."""
-        _LOGGER.info("Vantage send_ascii_nl: %s", cmd)
+        _LOGGER.debug("Vantage send_ascii_nl: %s", cmd)
         try:
             self._telnet.write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
@@ -261,9 +261,9 @@ class VantageXmlDbParser():
         for area_xml in areas:
             if self.project_name is None:
                 self.project_name = area_xml.find('Name').text
-                _LOGGER.info("Set project name to %s", self.project_name)
+                _LOGGER.debug("Set project name to %s", self.project_name)
             area = self._parse_area(area_xml)
-            _LOGGER.info("Area = %s", area)
+            _LOGGER.debug("Area = %s", area)
             self.vid_to_area[area.vid] = area
 
         loads = root.findall(".//Objects//Load[@VID]")
@@ -274,7 +274,7 @@ class VantageXmlDbParser():
                 continue
             self.outputs.append(output)
             self.vid_to_load[output.vid] = output
-            _LOGGER.info("Output = %s", output)
+            _LOGGER.debug("Output = %s", output)
             self.vid_to_area[output.area].add_output(output)
 
         load_groups = root.findall(".//Objects//LoadGroup[@VID]")
@@ -285,13 +285,13 @@ class VantageXmlDbParser():
             self.load_groups.append(lgroup)
             self.outputs.append(lgroup)
             self.vid_to_load[lgroup.vid] = lgroup
-            _LOGGER.info("load group = %s", lgroup)
+            _LOGGER.debug("load group = %s", lgroup)
             self.vid_to_area[lgroup.area].add_output(lgroup)
 
         keypads = root.findall(".//Objects//Keypad[@VID]")
         for kp_xml in keypads:
             keypad = self._parse_keypad(kp_xml)
-            _LOGGER.info("keypad = %s", keypad)
+            _LOGGER.debug("keypad = %s", keypad)
             self.vid_to_keypad[keypad.vid] = keypad
             self.vid_to_area[keypad.area].add_keypad(keypad)
             self.keypads.append(keypad)
@@ -301,7 +301,7 @@ class VantageXmlDbParser():
             b = self._parse_button(button_xml)
             if not b:
                 continue
-            _LOGGER.info("b = %s", b)
+            _LOGGER.debug("b = %s", b)
             self.vid_to_button[b.vid] = b
             if b.area != -1:
                 self.vid_to_area[b.area].add_button(b)
@@ -312,7 +312,7 @@ class VantageXmlDbParser():
             dc = self._parse_drycontact(dc_xml)
             if not dc:
                 continue
-            _LOGGER.info("dc = %s", dc)
+            _LOGGER.debug("dc = %s", dc)
             self.vid_to_button[dc.vid] = dc
             self.buttons.append(dc)
 
@@ -320,7 +320,7 @@ class VantageXmlDbParser():
         variables = root.findall(".//Objects//GMem[@VID]")
         for v in variables:
             var = self._parse_variable(v)
-            _LOGGER.info("var = %s", var)
+            _LOGGER.debug("var = %s", var)
             self.vid_to_variable[var.vid] = var
             # N.B. variables have categories, not areas, so no add to area
             self.variables.append(var)
@@ -328,7 +328,7 @@ class VantageXmlDbParser():
         omnisensors = root.findall(".//Objects//OmniSensor[@VID]")
         for s in omnisensors:
             sensor = self._parse_omnisensor(s)
-            _LOGGER.info("sensor = %s", sensor)
+            _LOGGER.debug("sensor = %s", sensor)
             self.vid_to_sensor[sensor.vid] = sensor
             # N.B. variables have categories, not areas, so no add to area
             self.sensors.append(sensor)
@@ -336,7 +336,7 @@ class VantageXmlDbParser():
         lightsensors = root.findall(".//Objects//LightSensor[@VID]")
         for s in lightsensors:
             sensor = self._parse_lightsensor(s)
-            _LOGGER.info("sensor = %s", sensor)
+            _LOGGER.debug("sensor = %s", sensor)
             self.vid_to_sensor[sensor.vid] = sensor
             # N.B. variables have categories, not areas, so no add to area
             self.sensors.append(sensor)
@@ -344,7 +344,7 @@ class VantageXmlDbParser():
         tasks = root.findall(".//Objects//Task[@VID]")
         for t in tasks:
             task = self._parse_task(t)
-            _LOGGER.info("task = %s", task)
+            _LOGGER.debug("task = %s", task)
             self.vid_to_task[task.vid] = task
             self.name_to_task[task.name] = task
             # N.B. tasks have categories, not areas, so no add to area
@@ -370,9 +370,9 @@ class VantageXmlDbParser():
                 continue
             self.vid_to_shade[shade.vid] = shade
             self.outputs.append(shade)
-            _LOGGER.info("shade = %s", shade)
+            _LOGGER.debug("shade = %s", shade)
 
-        _LOGGER.info("self._name_area_to_vid = %s", self._name_area_to_vid)
+        _LOGGER.debug("self._name_area_to_vid = %s", self._name_area_to_vid)
 
         return True
 
@@ -454,12 +454,12 @@ class VantageXmlDbParser():
             output_type = 'COLOR'
             omit_trailing_color_re = re.compile(r'\s+COLOR\s*$')
             load_name = omit_trailing_color_re.sub("", out_name)
-            _LOGGER.info("Found HID Type, guessing load name is %s", load_name)
+            _LOGGER.debug("Found HID Type, guessing load name is %s", load_name)
 
             load_vid = self._name_area_to_vid.get((load_name, area_vid), None)
             if load_vid:
                 self._vid_to_colorvid[load_vid] = vid
-                _LOGGER.info("Found colorvid = %d for load_vid %d (names %s and %s)"
+                _LOGGER.debug("Found colorvid = %d for load_vid %d (names %s and %s)"
                              " in area %s (%d)",
                              vid, load_vid, out_name, load_name, area_name, area_vid)
                 self.vid_to_load[load_vid].color_control_vid = vid
@@ -478,7 +478,7 @@ class VantageXmlDbParser():
             ch1 = output_xml.find('Channel1')
             ch2 = output_xml.find('Channel2')
             ch3 = output_xml.find('Channel3')
-            # _LOGGER.info("ch1 = %s, ch2 = %s", ch1.text, ch2.text)
+            # _LOGGER.debug("ch1 = %s, ch2 = %s", ch1.text, ch2.text)
             if not(ch1.text and ch1.text.strip() != ""):
                 _LOGGER.warning("RGB* load with missing Channel1: %s", out_name)
             if not(ch3.text and ch3.text.strip() != ""):
@@ -515,7 +515,7 @@ class VantageXmlDbParser():
         if not out_name or out_name.isspace():
             out_name = output_xml.find('Name').text
         else:
-            _LOGGER.info("Using dname = %s", out_name)
+            _LOGGER.debug("Using dname = %s", out_name)
         area_vid = int(output_xml.find('Area').text)
 
 #        area_name = self.vid_to_area[area_vid].name
@@ -533,7 +533,6 @@ class VantageXmlDbParser():
             else:
                 _LOGGER.warning("for loadgroup %d, vid %s supports color", vid, v)
 
-        out_name += ' [G]'
         output = LoadGroup(self._vantage,
                            name=out_name,
                            area=area_vid,
@@ -568,7 +567,7 @@ class VantageXmlDbParser():
         area = -1 # TODO could try to get area for this
         num = 0
         keypad = None
-        _LOGGER.info("Found DryContact with vid = %d", vid)
+        _LOGGER.debug("Found DryContact with vid = %d", vid)
         # Ugh, this is awful -- three different ways of representing bad-value
         button = Button(self._vantage, name, -1, vid, 0, parent_vid, None, False)
         return button
@@ -674,7 +673,7 @@ class Vantage():
             area = self._vid_to_area.get(parent_vid)
             if area:
                 answer.append(area.name)
-#    _LOGGER.info("lineage for " + str(obj.vid) + " is " + str(answer))
+#    _LOGGER.debug("lineage for " + str(obj.vid) + " is " + str(answer))
         return answer
 
     #TODO: cleanup this awful logic
@@ -768,7 +767,7 @@ class Vantage():
         elif cmd_type == 'TASK':
             return
         elif cmd_type == 'VARIABLE':
-            _LOGGER.info("vantage variable set response: %s", line)
+            _LOGGER.debug("vantage variable set response: %s", line)
 
         ids = self._ids.get(cmd_type, None)
         if ids is None:
@@ -883,7 +882,7 @@ class Vantage():
                                     "upon login attempt, response = "  + response)
                 if m.group(1) != "true":
                     raise Exception("Login failed, return code is: " + m.group(1))
-            _LOGGER.info("sent GetFile request")
+            _LOGGER.debug("sent GetFile request")
             ts.send("<IBackup><GetFile><call>Backup\\Project.dc"
                     "</call></GetFile></IBackup>\n".encode("ascii"))
             ts.settimeout(1)
@@ -901,7 +900,7 @@ class Vantage():
                 exit(-1)
             except socket.timeout:
                 ts.close()
-            _LOGGER.info("done reading")
+            _LOGGER.debug("done reading")
             response = response.decode('ascii')
             response = response[response.find("</Result>\n")+10:]
             response = response.replace('<?File Encode="Base64" /', '')
@@ -913,7 +912,7 @@ class Vantage():
                 f = open(filename, "w")
                 f.write(xml_db)
                 f.close()
-                _LOGGER.info("wrote file %s", filename)
+                _LOGGER.info("wrote file %s for cache", filename)
             except:
                 _LOGGER.warning("could not save %s", filename)
 
@@ -1193,7 +1192,7 @@ class Variable(VantageEntity):
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
         value = float(args[0])
-        _LOGGER.info("Setting variable %s (%d) to %s", self._name, self._vid, value)
+        _LOGGER.debug("Setting variable %s (%d) to %s", self._name, self._vid, value)
         self._value = value
         return self
 
@@ -1265,8 +1264,8 @@ class Output(VantageEntity):
                 light = self._vantage._vid_to_load.get(self._color_control_vid, None)
                 if light:
                     light._color_temp = color_temp
-                    _LOGGER.info("Received color change of VID %d set load VID %d to color = %d",
-                                 self._vid, self._color_control_vid, color_temp)
+                    _LOGGER.debug("Received color change of VID %d set load VID %d to color = %d",
+                                  self._vid, self._color_control_vid, color_temp)
                     light._query_waiters.notify()
                     return light
                 _LOGGER.warning("Received color change of VID %d but cannot "
@@ -1345,7 +1344,7 @@ class Output(VantageEntity):
             return
         # we need to adjust the rgb values to take into account the level
         r = self._level/100
-        _LOGGER.info("rgb = %s", json.dumps(new_rgb))
+        _LOGGER.debug("rgb = %s", json.dumps(new_rgb))
         # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
         self._vantage.send("INVOKE", self._vid,
                            ("RGBLoad.SetRGBW %d %d %d %d" %
@@ -1366,7 +1365,7 @@ class Output(VantageEntity):
         """Sets new Hue/Saturation levels."""
         if self._hs == new_hs:
             return
-        _LOGGER.info("hs = %s", json.dumps(new_hs))
+        _LOGGER.debug("hs = %s", json.dumps(new_hs))
         hs_color = HSVColor(new_hs[0], new_hs[1], 1.0)
         rgb = convert_color(hs_color, sRGBColor)
         self._vantage.send("INVOKE", self._vid,
@@ -1390,8 +1389,8 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.info("Ignoring call to setter for color_temp of dmx_color light %d",
-                         self._vid)
+            _LOGGER.debug("Ignoring call to setter for color_temp of dmx_color light %d",
+                          self._vid)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp), self._ramp_sec[2])
@@ -1628,8 +1627,8 @@ class PollingSensor(VantageEntity):
     def handle_update(self, args):
         """The callback invoked by the main event loop if there's a new value for the variable."""
         value = float(args[0])
-        _LOGGER.info("Setting sensor (%s) %s (%d) to %s",
-                     self._name, self._kind, self._vid, value)
+        _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
+                      self._name, self._kind, self._vid, value)
         self._value = value
         return self
 
@@ -1754,6 +1753,6 @@ class Shade(VantageEntity):
             value = float(args[1])
         else:
             value = float(value)
-        _LOGGER.info("Setting shade %s (%d) to float %s", self._name, self._vid, str(value))
+        _LOGGER.debug("Setting shade %s (%d) to float %s", self._name, self._vid, str(value))
         self._level = value
         return self
