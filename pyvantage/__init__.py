@@ -38,6 +38,7 @@ import re
 import json
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
+from collections import deque
 
 
 def xml_escape(s):
@@ -659,7 +660,7 @@ class Vantage():
         self._name = None
         self._conn = VantageConnection(host, user, password, cmd_port,
                                        self._recv)
-        self._last_cmd = ""
+        self._cmds = deque([])
         self._name_mappings = name_mappings
         self._file_port = file_port
         self._only_areas = only_areas
@@ -784,6 +785,7 @@ class Vantage():
         if line[0] == 'R':
             cmds = self._r_cmds
             typ = 'R'
+            this_cmd = self._cmds.popleft()
         elif line[0] == 'S':
             cmds = self._s_cmds
             typ = 'S'
@@ -810,7 +812,7 @@ class Vantage():
             return
         if line[0] == 'R' and cmd_type == "ERROR":
             _LOGGER.warning("Vantage %s on command: %s", line,
-                            self._last_cmd)
+                            this_cmd)
             return
         # is there ever an S:ERROR line? that's all the below covers
         if cmd_type == 'ERROR':
@@ -865,7 +867,7 @@ class Vantage():
     # Vantage
     def send_cmd(self, cmd):
         """Send the host command to the Vantage TCP socket."""
-        self._last_cmd = cmd
+        self._cmds.append(cmd)
         self._conn.send_ascii_nl(cmd)
 
     # Vantage
