@@ -785,7 +785,10 @@ class Vantage():
         if line[0] == 'R':
             cmds = self._r_cmds
             typ = 'R'
-            this_cmd = self._cmds.popleft()
+            if len(self._cmds) > 0:
+                this_cmd = self._cmds.popleft()
+            else:
+                this_cmd = "__UNDERFLOW__"
         elif line[0] == 'S':
             cmds = self._s_cmds
             typ = 'S'
