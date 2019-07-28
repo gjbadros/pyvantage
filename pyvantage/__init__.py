@@ -154,7 +154,8 @@ class VantageConnection(threading.Thread):
                                 e)
                 time.sleep(3)
                 continue
-        self._send_ascii_nl_locked("LOGIN " + self._user + " " + self._password)
+        self._send_ascii_nl_locked("LOGIN " + self._user +
+                                   " " + self._password)
         self._telnet.read_until(b'\r\n')
         self._send_ascii_nl_locked("STATUS LOAD")
         self._telnet.read_until(b'\r\n')
@@ -593,7 +594,7 @@ class VantageXmlDbParser():
         area = -1  # TODO could try to get area for this
         num = 0
         keypad = None
-        _LOGGER.info("Found DryContact with vid = %d", vid)
+        _LOGGER.debug("Found DryContact with vid = %d", vid)
         # Ugh, this is awful -- three different ways of representing bad-value
         button = Button(self._vantage, name, area, vid, num,
                         parent_vid, keypad, False)
@@ -958,7 +959,7 @@ class Vantage():
                 if m is None:
                     raise Exception(
                         "Could not find response code from controller "
-                        "upon login attempt, response = "  + response)
+                        "upon login attempt, response = " + response)
                 if m.group(1) != "true":
                     raise Exception("Login failed, return code is: " +
                                     m.group(1))
@@ -1247,46 +1248,6 @@ class Area():
         return tuple(sensor for sensor in self._sensors)
 
 
-class Variable(VantageEntity):
-    """A variable in the vantage system. See set_variable_vid.
-
-    """
-    CMD_TYPE = 'VARIABLE'  # GMem in the XML config
-
-    def __init__(self, vantage, name, vid):
-        """Initializes the variable object."""
-        super(Variable, self).__init__(vantage, name, None, vid)
-        self._value = None
-        self._vantage.register_id(Variable.CMD_TYPE, None, self)
-
-    def __str__(self):
-        """Returns pretty-printed representation of this object."""
-        return 'Variable name: "%s", vid: %d, value: %s' % (
-            self._name, self._vid, self._value)
-
-    @property
-    def value(self):
-        """The value of the variable."""
-        return self._value
-
-    @property
-    def kind(self):
-        """The type of object (for units in hass)."""
-        return 'variable'
-
-    def handle_update(self, args):
-        """Callback invoked by the main event loop.
-
-        This handles a new value for the variable.
-
-        """
-        value = float(args[0])
-        _LOGGER.debug("Setting variable %s (%d) to %s",
-                      self._name, self._vid, value)
-        self._value = value
-        return self
-
-
 class Output(VantageEntity):
     """This is the output entity in Vantage universe. This generally refers to a
     switched/dimmed load, e.g. light fixture, outlet, etc."""
@@ -1324,7 +1285,7 @@ class Output(VantageEntity):
                 self._name, self._area, self._output_type,
                 self._load_type, self._vid,
                 ("(dim) " if self.is_dimmable else ""),
-                ("(ctemp) " if selfelf.support_color_temp else ""),
+                ("(ctemp) " if self.support_color_temp else ""),
                 ("(color) " if self.support_color else ""),
                 self.full_lineage))
 
@@ -1388,6 +1349,10 @@ class Output(VantageEntity):
                     self._query_waiters.notify()
         return self
 
+    # TODO: It appears that after 64 ADDSTATUS calls, they start
+    # failing with ERROR:12 "Failed"
+    # Thus, we may need to ADDSTATUS and DELSTATUS and track which
+    # color lights have their status tracked....
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
         output. For pure on/off loads the result is either 0.0 or 100.0."""
@@ -1490,8 +1455,8 @@ class Output(VantageEntity):
             return
         if self._dmx_color or self._load_type == "DW":
             _LOGGER.debug("Ignoring call to setter for color_temp "
-                         "of dmx_color light %d",
-                         self._vid)
+                          "of dmx_color light %d",
+                          self._vid)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp),
@@ -1717,12 +1682,12 @@ class PollingSensor(VantageEntity):
     These sensors do not report values via STATUS commands
     but instead need to be polled."""
 
-    def __init__(self, vantage, name, area, vid):
+    def __init__(self, vantage, name, area, vid, kind):
         """Init base fields"""
         assert name is not None
         super(PollingSensor, self).__init__(vantage, name, area, vid)
         self._value = None
-        self._kind = None
+        self._kind = kind
 
     def needs_poll(self):
         return True
@@ -1747,11 +1712,29 @@ class PollingSensor(VantageEntity):
         This callback invoked by the main event loop.
 
         """
+        # TODO: this is not the right thing for non-numeric variables
         value = float(args[0])
         _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
                       self._name, self._kind, self._vid, value)
         self._value = value
         return self
+
+
+class Variable(PollingSensor):
+    """A variable in the vantage system. See set_variable_vid.
+
+    """
+    CMD_TYPE = 'VARIABLE'  # GMem in the XML config
+
+    def __init__(self, vantage, name, vid):
+        """Initializes the variable object."""
+        super(Variable, self).__init__(vantage, name, None, vid, 'variable')
+        self._vantage.register_id(Variable.CMD_TYPE, None, self)
+
+    def __str__(self):
+        """Returns pretty-printed representation of this object."""
+        return 'Variable name: "%s", vid: %d, value: %s' % (
+            self._name, self._vid, self._value)
 
 
 class LightSensor(PollingSensor):
@@ -1761,8 +1744,9 @@ class LightSensor(PollingSensor):
     def __init__(self, vantage, name, area, value_range, vid):
         """Initializes the motion sensor object."""
         assert name is not None
-        super(LightSensor, self).__init__(vantage, name, area, vid)
-        self._kind = 'light'
+        super(LightSensor, self).__init__(vantage, name,
+                                          area, vid,
+                                          'light')
         self.value_range = value_range
         self._vantage.register_id(self.CMD_TYPE, None, self)
 
@@ -1778,8 +1762,8 @@ class OmniSensor(PollingSensor):
 
     def __init__(self, vantage, name, kind, vid):
         """Initializes the sensor object."""
-        super(OmniSensor, self).__init__(vantage, name, None, vid)
-        self._kind = kind
+        super(OmniSensor, self).__init__(vantage, name, None, vid,
+                                         kind)
         self._vantage.register_id(self._kind.upper(), None, self)
 
     def __str__(self):
@@ -1819,7 +1803,7 @@ class Shade(VantageEntity):
                     'type': self._load_type, 'vid': self._vid})
 
     def last_level(self):
-        """Returns last cached value of the output level, no query is performed."""
+        """Returns last cached value of output level, no query is performed."""
         return self._level
 
     @property
