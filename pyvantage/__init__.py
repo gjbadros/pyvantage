@@ -475,7 +475,7 @@ class VantageXmlDbParser():
             _LOGGER.debug("Found HID Type, guessing load name is %s",
                           load_name)
 
-            load_vid = self._name_area_to_vid.get((load_name, area_vid), None)
+            load_vid = self._name_area_to_vid.get((load_name, area_vid))
             if load_vid:
                 self._vid_to_colorvid[load_vid] = vid
                 _LOGGER.info("Found colorvid = %d for load_vid %d"
@@ -527,7 +527,7 @@ class VantageXmlDbParser():
                         output_type=output_type,
                         load_type=load_type,
                         cc_vid=(load_vid if output_type == 'COLOR'
-                                else self._vid_to_colorvid.get(vid, None)),
+                                else self._vid_to_colorvid.get(vid)),
                         dmx_color=dmx_color,
                         vid=vid)
         return output
@@ -742,7 +742,7 @@ class Vantage():
             if ns.startswith('Color Load '):
                 continue
             if self._name_mappings:
-                mapped_name = self._name_mappings.get(ns.lower(), None)
+                mapped_name = self._name_mappings.get(ns.lower())
                 if mapped_name is not None:
                     if mapped_name is True:
                         continue
@@ -818,7 +818,7 @@ class Vantage():
         elif cmd_type == 'VARIABLE':
             _LOGGER.debug("vantage variable set response: %s", line)
 
-        ids = self._ids.get(cmd_type, None)
+        ids = self._ids.get(cmd_type)
         if ids is None:
             _LOGGER.warning("Might need to handle cmd_type ids: %s:: %s",
                             cmd_type, line)
@@ -887,7 +887,7 @@ class Vantage():
         """Call the task with vid."""
         num = re.compile(r'^\d+$')
         if isinstance(vid, int) or num.match(vid):
-            task = self._vid_to_task.get(int(vid), None)
+            task = self._vid_to_task.get(int(vid))
             if task is None:
                 _LOGGER.warning("Vid %d is not registered as a task", vid)
             # call it regardless
@@ -901,7 +901,7 @@ class Vantage():
         This is fragile - consider using call_task_vid.
 
         """
-        task = self._name_to_task.get(name, None)
+        task = self._name_to_task.get(name)
         if task is not None:
             self._conn.send_ascii_nl("TASK " + str(task.vid) + " RELEASE")
             _LOGGER.info("Calling task %s", task)
