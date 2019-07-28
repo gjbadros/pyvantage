@@ -659,6 +659,7 @@ class Vantage():
         self._name = None
         self._conn = VantageConnection(host, user, password, cmd_port,
                                        self._recv)
+        self._last_cmd = ""
         self._name_mappings = name_mappings
         self._file_port = file_port
         self._only_areas = only_areas
@@ -674,10 +675,11 @@ class Vantage():
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {}  # copied out from the parser
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE',
+                        'ERROR',
                         'TASK', 'GETBLIND', 'BLIND', 'INVOKE',
                         'GETLIGHT', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'ADDSTATUS', 'DELSTATUS',
-                        'GETCUSTOM', 'RAMPLOAD']
+                        'GETCUSTOM', 'RAMPLOAD', 'GETTEMPERATURE']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -806,7 +808,12 @@ class Vantage():
         # below
         if line[0] == 'R' and cmd_type in ('STATUS', 'ADDSTATUS',
                                            'DELSTATUS', 'INVOKE',
-                                           'GETCUSTOM', 'RAMPLOAD'):
+                                           'GETCUSTOM', 'RAMPLOAD',
+                                           'GETTEMPERATURE'):
+            return
+        if line[0] == 'R' and cmd_type == "ERROR":
+            _LOGGER.warning("Vantage %s on command: %s", line,
+                            self._last_cmd)
             return
         if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'GETLIGHT'):
@@ -857,6 +864,7 @@ class Vantage():
     # Vantage
     def send_cmd(self, cmd):
         """Send the host command to the Vantage TCP socket."""
+        self._last_cmd = cmd
         self._conn.send_ascii_nl(cmd)
 
     # Vantage
