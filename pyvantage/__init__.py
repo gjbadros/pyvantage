@@ -1350,7 +1350,7 @@ class Output(VantageEntity):
                     light._color_temp = color_temp
                     _LOGGER.debug("Received color change of VID %d "
                                   "set load VID %d to color = %d",
-                                 selfelf._vid, self._color_control_vid,
+                                  self._vid, self._color_control_vid,
                                   color_temp)
                     light._query_waiters.notify()
                     return light
