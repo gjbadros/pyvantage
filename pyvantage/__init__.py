@@ -676,9 +676,9 @@ class Vantage():
         self._vid_to_shade = {}  # copied out from the parser
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {}  # copied out from the parser
-        self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'VARIABLE',
+        self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'GETVARIABLE',
                         'ERROR',
-                        'TASK', 'GETBLIND', 'BLIND', 'INVOKE',
+                        'TASK', 'GETBLIND', 'BLIND', 'INVOKE', 'VARIABLE',
                         'GETLIGHT', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'ADDSTATUS', 'DELSTATUS',
                         'GETCUSTOM', 'RAMPLOAD', 'GETTEMPERATURE']
@@ -823,7 +823,7 @@ class Vantage():
             _LOGGER.error("_recv got ERROR line: %s", line)
             return
         if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT',
-                        'GETSENSOR', 'GETLIGHT'):
+                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'):
             cmd_type = cmd_type[3:]  # strip "GET" from front
         elif cmd_type == 'GETBLIND':
             return
@@ -849,7 +849,7 @@ class Vantage():
             if (typ == 'S' or
                     (typ == 'R' and
                      cmd_type in ('LOAD', 'POWER', 'CURRENT',
-                                  'SENSOR', 'LIGHT'))):
+                                  'VARIABLE', 'SENSOR', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
     def handle_update_and_notify(self, obj, args):
