@@ -874,7 +874,7 @@ class Vantage():
 #    out_cmd = ",".join(
 #        (cmd, str(vid)) + tuple((str(x) for x in args)))
         out_cmd = str(vid) + " " + " ".join(str(a) for a in args)
-        self._conn.send_ascii_nl(op + " " + out_cmd)
+        self.send_cmd(op + " " + out_cmd)
 
     # TODO: could confirm that this variable exists in the XML we download
     # and/or lookup the variables VID so that we can set it by name
@@ -883,14 +883,14 @@ class Vantage():
         be sure instance type of value is either int or string"""
         num = re.compile(r'^\d+$')
         if isinstance(value, int) or num.match(value):
-            self._conn.send_ascii_nl("VARIABLE " + str(vid) + " " + str(value))
+            self.send_cmd("VARIABLE " + str(vid) + " " + str(value))
         else:
             p = re.compile(r'["\n\r]')
             if p.match(value):
                 raise Exception("Newlines and quotes are "
                                 "not allowed in Text values")
-            self._conn.send_ascii_nl("VARIABLE " + str(vid) +
-                                     ' "' + value + '"')
+            self.send_cmd("VARIABLE " + str(vid) +
+                          ' "' + value + '"')
 
     def call_task_vid(self, vid):
         """Call the task with vid."""
@@ -900,7 +900,7 @@ class Vantage():
             if task is None:
                 _LOGGER.warning("Vid %d is not registered as a task", vid)
             # call it regardless
-            self._conn.send_ascii_nl("TASK " + str(vid) + " RELEASE")
+            self.send_cmd("TASK " + str(vid) + " RELEASE")
             _LOGGER.info("Calling task %s", task)
         else:
             _LOGGER.warning("Could not interpret %d as task vid", vid)
@@ -912,7 +912,7 @@ class Vantage():
         """
         task = self._name_to_task.get(name)
         if task is not None:
-            self._conn.send_ascii_nl("TASK " + str(task.vid) + " RELEASE")
+            self.send_cmd("TASK " + str(task.vid) + " RELEASE")
             _LOGGER.info("Calling task %s", task)
         else:
             _LOGGER.warning("No task with name = %s", name)
