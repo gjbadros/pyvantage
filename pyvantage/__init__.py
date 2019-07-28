@@ -797,9 +797,6 @@ class Vantage():
         if cmd_type not in cmds:
             _LOGGER.warning("Unknown cmd %s (%s)", cmd_type, line)
             return
-        if cmd_type == 'ERROR':
-            _LOGGER.error("_recv got ERROR line: %s", line)
-            return
         if cmd_type == 'LOGIN':
             _LOGGER.info("login successful")
             return
@@ -814,6 +811,10 @@ class Vantage():
         if line[0] == 'R' and cmd_type == "ERROR":
             _LOGGER.warning("Vantage %s on command: %s", line,
                             self._last_cmd)
+            return
+        # is there ever an S:ERROR line? that's all the below covers
+        if cmd_type == 'ERROR':
+            _LOGGER.error("_recv got ERROR line: %s", line)
             return
         if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'GETLIGHT'):
