@@ -1261,8 +1261,11 @@ class Output(VantageEntity):
         super(Output, self).__init__(vantage, name, area, vid)
         self._output_type = output_type
         self._load_type = load_type
+        self._extra_info['load_type'] = load_type
         self._level = 0.0
         self._color_temp = 2700
+        self._is_dimmable = (self._output_type == 'LIGHT' and
+                             self._load_type.lower().find("non-dim") == -1)
         self._rgb = [0, 0, 0]
         self._hs = [0, 0]
         # if _load_type == 'COLOR' then _color_control_vid
@@ -1391,11 +1394,14 @@ class Output(VantageEntity):
         if self._level == new_level:
             return
 
-        if new_level == 0:
-            ramp_sec = self._ramp_sec[1]
+        if self._is_dimmable:
+            if new_level == 0:
+                ramp_sec = self._ramp_sec[1]
+            else:
+                ramp_sec = self._ramp_sec[0]
+            self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
         else:
-            ramp_sec = self._ramp_sec[0]
-        self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
+            self._vantage.send("LOAD", self._vid, new_level)
         self._level = new_level
 
     @property
@@ -1486,7 +1492,7 @@ class Output(VantageEntity):
     @property
     def is_dimmable(self):
         """Returns a boolean of whether or not the output is dimmable."""
-        return self._load_type.lower().find("non-dim") == -1
+        return self._is_dimmable
 
     def set_ramp_sec(self, up, down, color):
         """Set the ramp speed for load changes, in seconds."""
@@ -1640,10 +1646,8 @@ class Keypad(VantageEntity):
         _LOGGER.debug("Keypad %d(%s): %s",
                       self._vid, self._name, args)
         self._value = args[0]
-        ei = {}
-        ei['button_name'] = args[1]
-        ei['button_action'] = args[2]
-        self._extra_info = ei
+        self._extra_info['button_name'] = args[1]
+        self._extra_info['button_action'] = args[2]
         return self
 
 
@@ -1784,6 +1788,7 @@ class Shade(VantageEntity):
         super(Shade, self).__init__(vantage, name, area_vid, vid)
         self._level = 100
         self._load_type = 'BLIND'
+        self._extra_info['load_type'] = self._load_type
         self._vantage.register_id(Shade.CMD_TYPE, None, self)
         self._query_waiters = _RequestHelper()
 
