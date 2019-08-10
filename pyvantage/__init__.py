@@ -396,38 +396,56 @@ class VantageXmlDbParser():
     def _parse_area(self, area_xml):
         """Parses an Area tag, which is effectively a room, depending on how the
         Vantage controller programming was done."""
-        area = Area(self._vantage,
-                    name=area_xml.find('Name').text,
-                    parent=int(area_xml.find('Area').text),
-                    vid=int(area_xml.get('VID')),
-                    note=area_xml.find('Note').text)
-        return area
+        try:
+            vid = int(area_xml.get('VID'))
+            area = Area(self._vantage,
+                        name=area_xml.find('Name').text,
+                        parent=int(area_xml.find('Area').text),
+                        vid=vid,
+                        note=area_xml.find('Note').text)
+            return area
+        except Exception as e:
+            _LOGGER.warning("Error parsing Area vid = %d: %s", vid, e)
 
     def _parse_variable(self, var_xml):
         """Parses a variable (GMem) tag."""
-        var = Variable(self._vantage,
-                       name=var_xml.find('Name').text,
-                       vid=int(var_xml.get('VID')))
-        return var
+        try:
+            vid = int(var_xml.get('VID'))
+            var = Variable(self._vantage,
+                           name=var_xml.find('Name').text,
+                           vid=vid)
+            return var
+        except Exception as e:
+            _LOGGER.warning("Error parsing variable vid = %d: %s", vid, e)
 
     def _parse_omnisensor(self, sensor_xml):
         """Parses an OmniSensor tag."""
-        kind = sensor_xml.find('Model').text.lower()
-        var = OmniSensor(self._vantage,
-                         name=sensor_xml.find('Name').text,
-                         kind=kind,
-                         vid=int(sensor_xml.get('VID')))
-        return var
+        try:
+            vid = int(sensor_xml.get('VID'))
+            kind = sensor_xml.find('Model').text.lower()
+            sensor = OmniSensor(self._vantage,
+                                name=sensor_xml.find('Name').text,
+                                kind=kind,
+                                vid=int(sensor_xml.get('VID')))
+            return sensor
+        except Exception as e:
+            _LOGGER.warning("Error parsing omnisensor vid = %d: %s", vid, e)
 
     def _parse_lightsensor(self, sensor_xml):
         """Parses a LightSensor object."""
-        value_range = (float(sensor_xml.find('RangeLow').text),
-                       float(sensor_xml.find('RangeHigh').text))
-        return LightSensor(self._vantage,
-                           name=sensor_xml.find('Name').text,
-                           area=int(sensor_xml.find('Area').text),
-                           value_range=value_range,
-                           vid=int(sensor_xml.get('VID')))
+        try:
+            vid = int(sensor_xml.get('VID'))
+            area_xml = sensor_xml.find('Area')
+            area = area_xml and int(area_xml.text) or -1
+            value_range = (float(sensor_xml.find('RangeLow').text),
+                           float(sensor_xml.find('RangeHigh').text))
+            return LightSensor(self._vantage,
+                               name=sensor_xml.find('Name').text,
+                               area=area,
+                               value_range=value_range,
+                               vid=vid)
+        except Exception as e:
+            _LOGGER.warning("Error parsing lightsensor vid = %d: %s", vid, e)
 
     def _parse_shade(self, shade_xml):
         """Parses a sahde node.
@@ -435,104 +453,112 @@ class VantageXmlDbParser():
         Either a MechoShade.IQ2_Shade_Node_CHILD or
         QMotion.QIS_Channel_CHILD (shade) tag.
         """
-        shade = Shade(self._vantage,
-                      name=shade_xml.find('Name').text,
-                      area_vid=int(shade_xml.find('Area').text),
-                      vid=int(shade_xml.get('VID')))
-        return shade
+        try:
+            vid = int(shade_xml.get('VID'))
+            shade = Shade(self._vantage,
+                          name=shade_xml.find('Name').text,
+                          area_vid=int(shade_xml.find('Area').text),
+                          vid=vid)
+            return shade
+        except Exception as e:
+            _LOGGER.warning("Error parsing shade vid = %d: %s", vid, e)
 
     def _parse_output(self, output_xml):
         """Parses a load, which is generally a switch controlling a set of
         lights/outlets, etc."""
-        out_name = output_xml.find('DName').text
-        if out_name:
-            out_name = out_name.strip()
-        if not out_name or out_name.isspace():
-            out_name = output_xml.find('Name').text.strip()
-        area_vid = int(output_xml.find('Area').text)
+        try:
+            vid = int(output_xml.get('VID'))
+            dname_xml = output_xml.find('DName')
+            out_name = dname_xml and dname_xml.text
+            if out_name:
+                out_name = out_name.strip()
+            if not out_name or out_name.isspace():
+                out_name = output_xml.find('Name').text.strip()
+            area_vid = int(output_xml.find('Area').text)
 
-        area_name = self.vid_to_area[area_vid].name.strip()
-        lt_xml = output_xml.find('LoadType')
-        if lt_xml is not None:
-            load_type = lt_xml.text.strip()
-        else:
-            load_type = output_xml.find('ColorType').text.strip()
-
-        output_type = 'LIGHT'
-        vid = int(output_xml.get('VID'))
-
-        # TODO: find a better heuristic so that on/off lights still show up
-        if load_type == 'High Voltage Relay':  # 'Low Voltage Relay'
-            output_type = 'RELAY'
-
-        if ' COLOR' in out_name and load_type != 'HID':
-            _LOGGER.warning("Load %s [%d] might be color load "
-                            "but of type %s not HID",
-                            out_name, vid, load_type)
-
-        if load_type == 'HID':
-            output_type = 'COLOR'
-            omit_trailing_color_re = re.compile(r'\s+COLOR\s*$')
-            load_name = omit_trailing_color_re.sub("", out_name)
-            _LOGGER.debug("Found HID Type, guessing load name is %s",
-                          load_name)
-
-            load_vid = self._name_area_to_vid.get((load_name, area_vid))
-            if load_vid:
-                self._vid_to_colorvid[load_vid] = vid
-                _LOGGER.info("Found colorvid = %d for load_vid %d"
-                             " (names %s and %s) in area %s (%d)",
-                             vid, load_vid, out_name, load_name,
-                             area_name, area_vid)
-                self.vid_to_load[load_vid].color_control_vid = vid
+            area_name = self.vid_to_area[area_vid].name.strip()
+            lt_xml = output_xml.find('LoadType')
+            if lt_xml is not None:
+                load_type = lt_xml.text.strip()
             else:
-                # TODO: do not assume that the regular loads are
-                # handled before the COLOR loads
-                _LOGGER.warning("Could not find matching load for "
-                                "COLOR load %s (%d) in area %s (%d)",
-                                out_name, vid, area_name, area_vid)
+                load_type = output_xml.find('ColorType').text.strip()
 
-        # it's a DMX color load if and only if it's RGB or RGBW loadtype
-        # and Channel2 is nonempty
-        # (we represent dynamic white as a R+B (no green) RGB load,
-        # and that only support_color_temp)
-        dmx_color = False
-        if load_type.startswith("RGB"):
-            ch1 = output_xml.find('Channel1')
-            ch2 = output_xml.find('Channel2')
-            ch3 = output_xml.find('Channel3')
-            # _LOGGER.debug("ch1 = %s, ch2 = %s", ch1.text, ch2.text)
-            if not(ch1.text and ch1.text.strip() != ""):
-                _LOGGER.warning("RGB* load with missing Channel1: %s",
-                                out_name)
-            if not(ch3.text and ch3.text.strip() != ""):
-                _LOGGER.warning("RGB* load with missing Channel3: %s",
-                                out_name)
-            if load_type == "RGBW":
-                if not(ch2.text and ch2.text.strip() != ""):
-                    _LOGGER.warning("RGBW load with missing Channel2: %s",
-                                    out_name)
-                dmx_color = True
-            else:   # load_type == "RGB"
-                if ch2.text and ch2.text.strip() != "":
-                    dmx_color = True
+            output_type = 'LIGHT'
+
+            # TODO: find a better heuristic so that on/off lights still show up
+            if load_type == 'High Voltage Relay':  # 'Low Voltage Relay'
+                output_type = 'RELAY'
+
+            if ' COLOR' in out_name and load_type != 'HID':
+                _LOGGER.warning("Load %s [%d] might be color load "
+                                "but of type %s not HID",
+                                out_name, vid, load_type)
+
+            if load_type == 'HID':
+                output_type = 'COLOR'
+                omit_trailing_color_re = re.compile(r'\s+COLOR\s*$')
+                load_name = omit_trailing_color_re.sub("", out_name)
+                _LOGGER.debug("Found HID Type, guessing load name is %s",
+                              load_name)
+
+                load_vid = self._name_area_to_vid.get((load_name, area_vid))
+                if load_vid:
+                    self._vid_to_colorvid[load_vid] = vid
+                    _LOGGER.info("Found colorvid = %d for load_vid %d"
+                                 " (names %s and %s) in area %s (%d)",
+                                 vid, load_vid, out_name, load_name,
+                                 area_name, area_vid)
+                    self.vid_to_load[load_vid].color_control_vid = vid
                 else:
-                    # just a dynamic white red/blue light
-                    # (just two shades of white, really)
-                    load_type = "DW"
+                    # TODO: do not assume that the regular loads are
+                    # handled before the COLOR loads
+                    _LOGGER.warning("Could not find matching load for "
+                                    "COLOR load %s (%d) in area %s (%d)",
+                                    out_name, vid, area_name, area_vid)
 
-        if output_type == 'LIGHT':
-            self._name_area_to_vid[(out_name, area_vid)] = vid
-        output = Output(self._vantage,
-                        name=out_name,
-                        area=area_vid,
-                        output_type=output_type,
-                        load_type=load_type,
-                        cc_vid=(load_vid if output_type == 'COLOR'
-                                else self._vid_to_colorvid.get(vid)),
-                        dmx_color=dmx_color,
-                        vid=vid)
-        return output
+            # it's a DMX color load if and only if it's RGB or RGBW loadtype
+            # and Channel2 is nonempty
+            # (we represent dynamic white as a R+B (no green) RGB load,
+            # and that only support_color_temp)
+            dmx_color = False
+            if load_type.startswith("RGB"):
+                ch1 = output_xml.find('Channel1')
+                ch2 = output_xml.find('Channel2')
+                ch3 = output_xml.find('Channel3')
+                # _LOGGER.debug("ch1 = %s, ch2 = %s", ch1.text, ch2.text)
+                if not(ch1.text and ch1.text.strip() != ""):
+                    _LOGGER.warning("RGB* load with missing Channel1: %s",
+                                    out_name)
+                if not(ch3.text and ch3.text.strip() != ""):
+                    _LOGGER.warning("RGB* load with missing Channel3: %s",
+                                    out_name)
+                if load_type == "RGBW":
+                    if not(ch2.text and ch2.text.strip() != ""):
+                        _LOGGER.warning("RGBW load with missing Channel2: %s",
+                                        out_name)
+                    dmx_color = True
+                else:   # load_type == "RGB"
+                    if ch2.text and ch2.text.strip() != "":
+                        dmx_color = True
+                    else:
+                        # just a dynamic white red/blue light
+                        # (just two shades of white, really)
+                        load_type = "DW"
+
+            if output_type == 'LIGHT':
+                self._name_area_to_vid[(out_name, area_vid)] = vid
+            output = Output(self._vantage,
+                            name=out_name,
+                            area=area_vid,
+                            output_type=output_type,
+                            load_type=load_type,
+                            cc_vid=(load_vid if output_type == 'COLOR'
+                                    else self._vid_to_colorvid.get(vid)),
+                            dmx_color=dmx_color,
+                            vid=vid)
+            return output
+        except Exception as e:
+            _LOGGER.warning("Error parsing Output vid = %d: %s", vid, e)
 
     def _parse_load_group(self, output_xml):
         """Parses a load group, which is a set of loads"""
@@ -587,41 +613,58 @@ class VantageXmlDbParser():
 
     def _parse_drycontact(self, dc_xml):
         """Parses a button device that part of a keypad."""
-        vid = int(dc_xml.get('VID'))
-        name = dc_xml.find('Name').text + ' [C]'
-        parent = dc_xml.find('Parent')
-        parent_vid = int(parent.text)
-        area = -1  # TODO could try to get area for this
-        num = 0
-        keypad = None
-        _LOGGER.debug("Found DryContact with vid = %d", vid)
-        # Ugh, this is awful -- three different ways of representing bad-value
-        button = Button(self._vantage, name, area, vid, num,
-                        parent_vid, keypad, False)
-        return button
+        try:
+            vid = int(dc_xml.get('VID'))
+            name = dc_xml.find('Name').text + ' [C]'
+            parent = dc_xml.find('Parent')
+            parent_vid = int(parent.text)
+            area = -1  # TODO could try to get area for this
+            num = 0
+            keypad = None
+            _LOGGER.debug("Found DryContact with vid = %d", vid)
+            # Ugh, awful -- three different ways of representing bad-value
+            button = Button(self._vantage, name, area, vid, num,
+                            parent_vid, keypad, False)
+            return button
+        except Exception as e:
+            _LOGGER.warning("Error parsing drycontact vid = %d: %s",
+                            vid, e)        
 
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
-        vid = int(button_xml.get('VID'))
-        name = button_xml.find('Name').text + ' [B]'
-        # no Text1 sub-element on DryContact
-        parent = button_xml.find('Parent')
-        parent_vid = int(parent.text)
-        text1 = button_xml.find('Text1').text
-        text2 = button_xml.find('Text2').text
-        desc = _desc_from_t1t2(text1, text2)
-        num = int(parent.get('Position'))
-        keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
-        if keypad is None:
-            _LOGGER.warning("No parent vid = %d for button vid = %d "
-                            "(leaving button out)",
-                            parent_vid, vid)
-            return None
-        area = keypad.area
-        button = Button(self._vantage, name, area, vid, num, parent_vid,
-                        keypad, desc)
-        keypad.add_button(button)
-        return button
+        try:
+            vid = int(button_xml.get('VID'))
+            xml_name = button_xml.find('Name')
+            if xml_name:
+                name = xml_name.text
+            else:
+                xml_name = button_xml.find("Text1")
+                if xml_name is None:
+                    return None
+                xml_text2 = button_xml.find("Text2")
+                name = (xml_name.text or '') + ' ' + (xml_text2.text or '')
+            name += ' [B]'
+            # no Text1 sub-element on DryContact
+            parent = button_xml.find('Parent')
+            parent_vid = int(parent.text)
+            text1 = button_xml.find('Text1').text
+            text2 = button_xml.find('Text2').text
+            desc = _desc_from_t1t2(text1, text2)
+            num = int(parent.get('Position'))
+            keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
+            if keypad is None:
+                _LOGGER.info("No parent vid = %d for button vid = %d "
+                             "(leaving button out)",
+                             parent_vid, vid)
+                return None
+            area = keypad.area
+            button = Button(self._vantage, name, area, vid, num, parent_vid,
+                            keypad, desc)
+            keypad.add_button(button)
+            return button
+        except Exception as e:
+            _LOGGER.warning("Error parsing button vid = %d: %s",
+                            vid, e)
 
 
 # Connect to port 2001 and write
@@ -649,18 +692,24 @@ class Vantage():
     # Status report lines come back from Vantage with this prefix
     OP_STATUS = 'S:'
 
+
     def __init__(self, host, user, password,
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
-                 name_mappings=None):
+                 name_mappings=None, filename=None):
         """Initializes the Vantage object. No connection is made to the remote
         device."""
         self._host = host
         self._user = user
         self._password = password
         self._name = None
-        self._conn = VantageConnection(host, user, password, cmd_port,
-                                       self._recv)
+        if self._host is not None:
+            self._conn = VantageConnection(host, user, password, cmd_port,
+                                           self._recv)
+        else:
+            self._conn = None
+            if filename is None:
+                raise Exception("Need host or filename to be specified")
         self._cmds = deque([])
         self._name_mappings = name_mappings
         self._file_port = file_port
@@ -1000,7 +1049,9 @@ class Vantage():
 
         _LOGGER.info("Loaded xml db")
         # print(xml_db[0:10000])
+        self.do_parse(xml_db)
 
+    def do_parse(self, xml_db):
         parser = VantageXmlDbParser(vantage=self, xml_db_str=xml_db)
         self._vid_to_load = parser.vid_to_load
         self._vid_to_variable = parser.vid_to_variable

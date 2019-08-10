@@ -20,12 +20,14 @@ logging.basicConfig(level=logging.DEBUG)
 def parse_args():
     parser = argparse.ArgumentParser("pyvantage")
 
-    parser.add_argument('--host', required=True, action='store', dest='host',
+    parser.add_argument('--host', action='store', dest='host',
                         help="Host to connect to in")
     parser.add_argument('--sleep-for', action='store', type=int, dest='sleep_for',
                         help="Sleep and monitor events for some number of seconds before exiting")
     parser.add_argument('--use-cache', action='store_true', dest='use_cache',
                         help="Use cache instead of refetching config from host")
+    parser.add_argument('--parse-file', action='store', dest='dc_filename',
+                        help="Just parse the file instead of connecting to host")
     parser.add_argument('--run-tests', action='store_true', dest='run_tests',
                         help="Run various tests to demonstrate some functonality")
     parser.add_argument('--user', action='store', dest='user',
@@ -82,11 +84,26 @@ def main():
     name_mappings['main floor'] = 'M'
     name_mappings['basement'] = 'B'
     name_mappings['outside'] = 'OUT'
-    name_mappings['0-10v relays'] = True # means to skip
+    name_mappings['0-10v relays'] = True  # means to skip
 
     args = parse_args()
 
-    v = Vantage(args.host, args.user, args.password, None, None, 3001, 2001, name_mappings)
+    if args.dc_filename is not None:
+        v = Vantage(None, None, None, filename=args.dc_filename)
+        try:
+            f = open(args.dc_filename, "r")
+            xml_db = f.read()
+            f.close()
+            _LOGGER.info("read vantage configuration file %s",
+                         args.dc_filename)
+            v.do_parse(xml_db)
+        except Exception as e:
+            _LOGGER.warning("Failed loading cached config: %s",
+                            e)
+        return
+
+    v = Vantage(args.host, args.user, args.password, None, None,
+                3001, 2001, name_mappings)
     v.load_xml_db(not args.use_cache)
     v.connect()
 
