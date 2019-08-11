@@ -1556,8 +1556,24 @@ class Output(VantageEntity):
     def is_output(self):
         return True
 
+class VantageSensor(VantageEntity):
+    """This is Vantage device that has a value."""
 
-class Button(VantageEntity):
+    def __init__(self, vantage, name, area, vid):
+        super(VantageSensor, self).__init__(vantage, name, area, vid)
+        self._value = None
+
+    @property
+    def value(self):
+        """The value of the last action of the button."""
+        return self._value
+
+    def set_initial_value(self, val):
+        """Set the initial value for cases where it is restored."""
+        self._value = val
+
+
+class Button(VantageSensor):
     """This object represents a keypad button that we can trigger and handle
     events for (button presses)."""
 
@@ -1569,7 +1585,6 @@ class Button(VantageEntity):
         self._parent = parent
         self._keypad = keypad
         self._desc = desc
-        self._value = None  # the last action reported
         self._vantage.register_id(Button.CMD_TYPE, None, self)
 
     def __str__(self):
@@ -1583,11 +1598,6 @@ class Button(VantageEntity):
         return str({'name': self._name, 'num': self._num,
                     'area': self._area, 'vid': self._vid,
                     'desc': self._desc})
-
-    @property
-    def value(self):
-        """The value of the last action of the button."""
-        return self._value
 
     @property
     def kind(self):
@@ -1651,7 +1661,7 @@ class LoadGroup(Output):
                     self.full_lineage))
 
 
-class Keypad(VantageEntity):
+class Keypad(VantageSensor):
     """Object representing a Vantage keypad.
 
     Currently we don't really do much with it except handle the events
@@ -1663,7 +1673,6 @@ class Keypad(VantageEntity):
         """Initializes the Keypad object."""
         super(Keypad, self).__init__(vantage, name, area, vid)
         self._buttons = []
-        self._value = None
         self._vantage.register_id(Keypad.CMD_TYPE, None, self)
 
     def add_button(self, button):
@@ -1685,11 +1694,6 @@ class Keypad(VantageEntity):
     def kind(self):
         """The type of object (for units in hass)."""
         return 'keypad'
-
-    @property
-    def value(self):
-        """The value of the variable."""
-        return self._value
 
     def handle_update(self, args):
         """The callback invoked by a button's handle_update to
@@ -1732,7 +1736,7 @@ class Task(VantageEntity):
         return self
 
 
-class PollingSensor(VantageEntity):
+class PollingSensor(VantageSensor):
     """Base class for LightSensor and OmniSensor.
     These sensors do not report values via STATUS commands
     but instead need to be polled."""
@@ -1741,16 +1745,10 @@ class PollingSensor(VantageEntity):
         """Init base fields"""
         assert name is not None
         super(PollingSensor, self).__init__(vantage, name, area, vid)
-        self._value = None
         self._kind = kind
 
     def needs_poll(self):
         return True
-
-    @property
-    def value(self):
-        """The value of the variable."""
-        return self._value
 
     @property
     def kind(self):
