@@ -635,6 +635,7 @@ class VantageXmlDbParser():
         try:
             vid = int(button_xml.get('VID'))
             xml_name = button_xml.find('Name')
+            name = ""
             if xml_name:
                 name = xml_name.text.strip()
             if not name:
