@@ -636,13 +636,14 @@ class VantageXmlDbParser():
             vid = int(button_xml.get('VID'))
             xml_name = button_xml.find('Name')
             if xml_name:
-                name = xml_name.text
-            else:
+                name = xml_name.text.strip()
+            if not name:
                 xml_name = button_xml.find("Text1")
                 if xml_name is None:
                     return None
                 xml_text2 = button_xml.find("Text2")
-                name = (xml_name.text or '') + ' ' + (xml_text2.text or '')
+                name = ((xml_name.text.strip() or '') + ' ' +
+                        (xml_text2.text.strip() or ''))
             name += ' [B]'
             # no Text1 sub-element on DryContact
             parent = button_xml.find('Parent')
