@@ -643,8 +643,9 @@ class VantageXmlDbParser():
                 if xml_name is None:
                     return None
                 xml_text2 = button_xml.find("Text2")
-                name = ((xml_name.text.strip() or '') + ' ' +
-                        (xml_text2.text.strip() or ''))
+                text1 = xml_name.text or ""
+                text2 = xml_text2.text or ""
+                name = text1.strip() + ' ' + text2.strip()
             name += ' [B]'
             # no Text1 sub-element on DryContact
             parent = button_xml.find('Parent')
