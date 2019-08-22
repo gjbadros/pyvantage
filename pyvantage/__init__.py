@@ -1771,7 +1771,7 @@ class PollingSensor(VantageSensor):
         # TODO: this is not the right thing for non-numeric variables
         try:
             value = float(args[0])
-        except e:
+        except Exception:
             value = args[0]
         _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
                       self._name, self._kind, self._vid, value)
