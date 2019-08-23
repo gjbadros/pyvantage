@@ -1480,12 +1480,10 @@ class Output(VantageEntity):
         self._hs = [hs_color.hsv_h, hs_color.hsv_s]
         self._rgb = new_rgb
         self._update_rgb()
-        if self._level == 0:
-            self._rgb_is_dirty = True
+        self._rgb_is_dirty = (self._level == 0)
 
     def _update_rgb(self):
         """Update the RGB of the light to self._rgb"""
-        self._rgb_is_dirty = False
         (r, g, b) = self._rgb
         ratio = self._level/100
         self._vantage.send("INVOKE", self._vid,
