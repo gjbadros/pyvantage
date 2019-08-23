@@ -1332,6 +1332,7 @@ class Output(VantageEntity):
         self._vantage.register_id(Output.CMD_TYPE,
                                   "STATUS" if dmx_color else None,
                                   self)
+        self._rgb_is_dirty = False
         self._addedstatus = False
 
     def __str__(self):
@@ -1448,6 +1449,10 @@ class Output(VantageEntity):
         if self._level == new_level:
             return
 
+        self._level = new_level
+        if self._rgb_is_dirty:
+            self._update_rgb()
+
         if self._is_dimmable:
             if new_level == 0:
                 ramp_sec = self._ramp_sec[1]
@@ -1456,7 +1461,6 @@ class Output(VantageEntity):
             self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
         else:
             self._vantage.send("LOAD", self._vid, new_level)
-        self._level = new_level
 
     @property
     def rgb(self):
@@ -1469,16 +1473,24 @@ class Output(VantageEntity):
         if self._rgb == new_rgb:
             return
         # we need to adjust the rgb values to take into account the level
-        r = self._level/100
         _LOGGER.debug("rgb = %s", json.dumps(new_rgb))
         # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
-        self._vantage.send("INVOKE", self._vid,
-                           ("RGBLoad.SetRGBW %d %d %d %d" %
-                            (new_rgb[0]*r, new_rgb[1]*r, new_rgb[2]*r, 0)))
         srgb = sRGBColor(*new_rgb)
         hs_color = convert_color(srgb, HSVColor)
         self._hs = [hs_color.hsv_h, hs_color.hsv_s]
         self._rgb = new_rgb
+        self._update_rgb()
+        if self._level == 0:
+            self._rgb_is_dirty = True
+
+    def _update_rgb(self):
+        """Update the RGB of the light to self._rgb"""
+        self._rgb_is_dirty = False
+        (r, g, b) = self._rgb
+        ratio = self._level/100
+        self._vantage.send("INVOKE", self._vid,
+                           ("RGBLoad.SetRGBW %d %d %d %d" %
+                            (r*ratio, g*ratio, b*ratio, 0)))
 
     @property
     # hue is scaled 0-360, saturation is 0-100
@@ -1558,6 +1570,7 @@ class Output(VantageEntity):
 
     def is_output(self):
         return True
+
 
 class VantageSensor(VantageEntity):
     """This is Vantage device that has a value."""
