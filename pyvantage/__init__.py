@@ -1339,9 +1339,10 @@ class Output(VantageEntity):
         """Returns a pretty-printed string for this object."""
         return (
             "Output name: '%s' area: %d type: '%s' load: '%s'"
-            "vid: %d %s%s%s [%s]" % (
+            "vid: %d %s%s%s%s [%s]" % (
                 self._name, self._area, self._output_type,
                 self._load_type, self._vid,
+                ("# " if self._rgb_is_dirty else ""),
                 ("(dim) " if self.is_dimmable else ""),
                 ("(ctemp) " if self.support_color_temp else ""),
                 ("(color) " if self.support_color else ""),
@@ -1473,7 +1474,8 @@ class Output(VantageEntity):
         if self._rgb == new_rgb:
             return
         # we need to adjust the rgb values to take into account the level
-        _LOGGER.debug("rgb = %s", json.dumps(new_rgb))
+        _LOGGER.debug("%s: rgb = %s", self,
+                      json.dumps(new_rgb))
         # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
         srgb = sRGBColor(*new_rgb)
         hs_color = convert_color(srgb, HSVColor)
@@ -1501,7 +1503,8 @@ class Output(VantageEntity):
         """Sets new Hue/Saturation levels."""
         if self._hs == new_hs:
             return
-        _LOGGER.debug("hs = %s", json.dumps(new_hs))
+        _LOGGER.debug("%s: hs = %s", self,
+                      json.dumps(new_hs))
         hs_color = HSVColor(new_hs[0], new_hs[1], 1.0)
         rgb = convert_color(hs_color, sRGBColor)
         self._vantage.send("INVOKE", self._vid,
@@ -1524,9 +1527,9 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.debug("Ignoring call to setter for color_temp "
-                          "of dmx_color light %d",
-                          self._vid)
+            _LOGGER.debug("%s: Ignoring call to setter for color_temp "
+                          "of dmx_color light",
+                          self)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp),
