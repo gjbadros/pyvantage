@@ -1338,10 +1338,10 @@ class Output(VantageEntity):
     def __str__(self):
         """Returns a pretty-printed string for this object."""
         return (
-            "Output name: '%s' area: %d type: '%s' load: '%s'"
-            "vid: %d %s%s%s%s [%s]" % (
+            "Output name: '%s' area: %d type: '%s' load: '%s' "
+            "vid: %d @ %s %s%s%s%s [%s]" % (
                 self._name, self._area, self._output_type,
-                self._load_type, self._vid,
+                self._load_type, self._vid, self._level,
                 ("# " if self._rgb_is_dirty else ""),
                 ("(dim) " if self.is_dimmable else ""),
                 ("(ctemp) " if self.support_color_temp else ""),
