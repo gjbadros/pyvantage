@@ -436,7 +436,7 @@ class VantageXmlDbParser():
         try:
             vid = int(sensor_xml.get('VID'))
             area_xml = sensor_xml.find('Area')
-            area = area_xml and int(area_xml.text) or -1
+            area = (area_xml is not None and int(area_xml.text)) or -1
             value_range = (float(sensor_xml.find('RangeLow').text),
                            float(sensor_xml.find('RangeHigh').text))
             return LightSensor(self._vantage,
@@ -469,7 +469,7 @@ class VantageXmlDbParser():
         try:
             vid = int(output_xml.get('VID'))
             dname_xml = output_xml.find('DName')
-            out_name = dname_xml and dname_xml.text
+            out_name = dname_xml is not None and dname_xml.text
             if out_name:
                 out_name = out_name.strip()
             if not out_name or out_name.isspace():
@@ -1825,8 +1825,8 @@ class LightSensor(PollingSensor):
 
     def __str__(self):
         """Returns pretty-printed representation of this object."""
-        return 'LightSensor name (%s): "%s", vid: %d, value: %s' % (
-            self._name, self._kind, self._vid, self._value)
+        return 'LightSensor name (%s), area: "%s", kind: "%s", vid: %d, value: %s' % (
+            self._name, self._area, self._kind, self._vid, self._value)
 
 
 class OmniSensor(PollingSensor):
