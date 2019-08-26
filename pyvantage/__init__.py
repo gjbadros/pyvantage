@@ -1451,6 +1451,7 @@ class Output(VantageEntity):
             return
 
         self._level = new_level
+        _LOGGER.debug("level setter: %s", self)
         if self._rgb_is_dirty:
             self._update_rgb()
 
@@ -1667,7 +1668,7 @@ class LoadGroup(Output):
 
     def __str__(self):
         """Returns a pretty-printed string for this object."""
-        return ("Output name: '%s' area: %d type: '%s' load: '%s'"
+        return ("Output name: '%s' area: %d type: '%s' load: '%s' "
                 "id: %d %s%s%s (%s) [%s]" % (
                     self._name, self._area, self._output_type,
                     self._load_type, self._vid,
