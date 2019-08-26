@@ -1472,6 +1472,8 @@ class Output(VantageEntity):
     @rgb.setter
     def rgb(self, new_rgb):
         """Sets new color for the light."""
+        if self._level == 0:
+            self._rgb_is_dirty = True
         if self._rgb == new_rgb:
             return
         # we need to adjust the rgb values to take into account the level
@@ -1483,7 +1485,7 @@ class Output(VantageEntity):
         self._hs = [hs_color.hsv_h, hs_color.hsv_s]
         self._rgb = new_rgb
         self._update_rgb()
-        self._rgb_is_dirty = (self._level == 0)
+#        self._rgb_is_dirty = (self._level == 0)
 
     def _update_rgb(self):
         """Update the RGB of the light to self._rgb"""
