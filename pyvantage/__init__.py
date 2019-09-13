@@ -154,9 +154,10 @@ class VantageConnection(threading.Thread):
                                 e)
                 time.sleep(3)
                 continue
-        self._send_ascii_nl_locked("LOGIN " + self._user +
-                                   " " + self._password)
-        self._telnet.read_until(b'\r\n')
+        if not (self._user is None or self._password is None):
+            self._send_ascii_nl_locked("LOGIN " + self._user +
+                                       " " + self._password)
+            self._telnet.read_until(b'\r\n')
         self._send_ascii_nl_locked("STATUS LOAD")
         self._telnet.read_until(b'\r\n')
         self._send_ascii_nl_locked("STATUS BLIND")
