@@ -39,14 +39,7 @@ import json
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
 from collections import deque
-
-
-def xml_escape(s):
-    """Escape XML meta characters '<' and '&'."""
-    answer = s.replace("<", "&lt;")
-    answer = answer.replace("&", "&amp;")
-    return answer
-
+from xml.sax.saxutils import escape
 
 def kelvin_to_level(kelvin):
     """Convert kelvin temperature to a USAI level."""
@@ -1002,8 +995,8 @@ class Vantage():
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
                          "</call></Login></ILogin>\n"
-                         % (xml_escape(self._user),
-                            xml_escape(self._password))).encode("ascii"))
+                         % (escape(self._user),
+                            escape(self._password))).encode("ascii"))
                 response = ""
                 while not response.endswith("</ILogin>\n"):
                     response += ts.recv(4096).decode('ascii')
