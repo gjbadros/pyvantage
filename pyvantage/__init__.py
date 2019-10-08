@@ -21,13 +21,6 @@ Then the component/vantage.py and its require line will work.
 __Author__ = "Greg J. Badros"
 __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 
-# TODO:
-# Handle OmniSensor elements:
-#     <Model>Temperature</Model> using getsensor (for temperature in celsius)
-#     <Model>Power</Model> using getpower (for power in watts)
-#     <Model>Current</Model> using getcurrent (for current in amps)
-
-
 import logging
 import telnetlib
 import socket
@@ -417,7 +410,11 @@ class VantageXmlDbParser():
         """Parses an OmniSensor tag."""
         try:
             vid = int(sensor_xml.get('VID'))
-            kind = sensor_xml.find('Model').text.lower()
+            kind = {
+                "Power"      :"power",
+                "Current"    :"current",
+                "Temperature":"sensor"
+            }[sensor_xml.find('Model').text]
             sensor = OmniSensor(self._vantage,
                                 name=sensor_xml.find('Name').text,
                                 kind=kind,
@@ -728,7 +725,7 @@ class Vantage():
                         'TASK', 'GETBLIND', 'BLIND', 'INVOKE', 'VARIABLE',
                         'GETLIGHT', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'ADDSTATUS', 'DELSTATUS',
-                        'GETCUSTOM', 'RAMPLOAD', 'GETTEMPERATURE']
+                        'GETCUSTOM', 'RAMPLOAD']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -858,8 +855,7 @@ class Vantage():
         # below
         if line[0] == 'R' and cmd_type in ('STATUS', 'ADDSTATUS',
                                            'DELSTATUS', 'INVOKE',
-                                           'GETCUSTOM', 'RAMPLOAD',
-                                           'GETTEMPERATURE'):
+                                           'GETCUSTOM', 'RAMPLOAD'):
             return
         if line[0] == 'R' and cmd_type == "ERROR":
             _LOGGER.warning("Vantage %s on command: %s", line,
