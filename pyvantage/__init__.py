@@ -74,6 +74,21 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 #     Schedule, Script, SerialPort, StationPunch, Timer, User, UserGroup,
 #     WireLink, CameraWidget, LightingWidget, MediaWidget, SceneWidget,
 #     SecurityWidget, TimerWidget.
+#
+# Things that Vantage can do which are not yet supported:
+#
+# - Beep keypads. (There no direct support for this via TCP interface that I can
+#   see.  It appears the beep function is implemented from lower-level
+#   primitives in the XML config file.)
+#
+# - Change button colors.
+#
+# - Detect double/triple/quadruple presses on buttons, or long presses. (This is
+#   also implemented from lower-level primitives in the XML config.  Clients of
+#   this library just have to count press and release events themselves).
+# 
+# - Control devices connected via serial/ethernet links, such as Elk alarms,
+#   stereo systems, etc.
 
 import logging
 import telnetlib
@@ -827,6 +842,8 @@ class Vantage():
 
         """
 
+        # First, register the VID in our _ids map.  When we issue commands to
+        # the Vantage this map lets us route the respones to the correct object:
         ids = self._ids.setdefault(cmd_type, {})
         ids = self._ids.setdefault(cmd_type2, {})
         if obj.vid in ids:
@@ -834,6 +851,12 @@ class Vantage():
         self._ids[cmd_type][obj.vid] = obj
         if cmd_type2:
             self._ids[cmd_type2][obj.vid] = obj
+
+        # Now give the object a unique name.  We prefix in reverse order the
+        # areas the object is contained in.  So an object may be called "Main
+        # Floor-Kitchen-Ceiling Can Lights".  Every object must have a unique
+        # name, if there is a duplicate then (VID) is attached to the end.
+
         lineage = self.get_lineage_from_obj(obj)
         name = ""
         # reverse all but the last element in list
@@ -873,6 +896,7 @@ class Vantage():
         self._names[obj.name] = obj.vid
 
     # TODO: update this to handle async status updates
+    # Note: invoked on VantageConnection thread.
     def _recv(self, line):
         """Invoked by the connection manager to process incoming data."""
         _LOGGER.debug("_recv got line: %s", line)
@@ -949,6 +973,7 @@ class Vantage():
                                   'VARIABLE', 'SENSOR', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
+    # Note: invoked on VantageConnection thread.
     def handle_update_and_notify(self, obj, args):
         """Call handle_update for the obj and for subscribers."""
         handled = obj.handle_update(args)
