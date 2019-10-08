@@ -674,17 +674,21 @@ class VantageXmlDbParser():
 
     def _parse_drycontact(self, dc_xml):
         """Parses a button device that part of a keypad."""
+        # A dry contact switch *may* be plugged into the back of a keypad (and
+        # hence has a keypad like a button does), but nobody cares if it does.
+        # A dry contact in other respects acts like a button, so treat it as
+        # one.
         try:
             vid = int(dc_xml.get('VID'))
             name = dc_xml.find('Name').text + ' [C]'
             parent = dc_xml.find('Parent')
             parent_vid = int(parent.text)
-            area = -1  # TODO could try to get area for this
+            area_vid = int(dc_xml.find('Area').text)
             num = 0
             keypad = None
             _LOGGER.debug("Found DryContact with vid = %d", vid)
             # Ugh, awful -- three different ways of representing bad-value
-            button = Button(self._vantage, name, area, vid, num,
+            button = Button(self._vantage, name, area_vid, vid, num,
                             parent_vid, keypad, False)
             return button
         except Exception as e:
