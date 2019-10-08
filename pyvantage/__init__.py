@@ -36,6 +36,7 @@ import time
 import base64
 import re
 import json
+import os
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
 from collections import deque
@@ -969,9 +970,9 @@ class Vantage():
         else:
             _LOGGER.warning("No task with name = %s", name)
 
-    def load_xml_db(self, disable_cache=False):
+    def load_xml_db(self, disable_cache=False, config_dir="./"):
         """Load the Vantage database from the server."""
-        filename = self._host + "_config.txt"
+        filename = os.path.join(config_dir, self._host + "_config.txt")
         xml_db = ""
         success = False
         if not disable_cache:
