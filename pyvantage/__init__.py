@@ -21,6 +21,60 @@ Then the component/vantage.py and its require line will work.
 __Author__ = "Greg J. Badros"
 __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 
+# USAGE:
+#
+# Instantiate a Vantage controller object:
+#
+#   vc = Vantage("192.168.1.42", "myusername", "mypassword");
+#
+# Load the XML configuration file for the controller.  First tries to read
+# cache from local disk, if not available retrieves it from controller.  This
+# is then parsed to generate a Python object for every object with a VID on
+# the controller.  (See below for mapping from Vantage to pyvantage objects.)
+#
+#   vc.load_xml_db();
+#
+# Decide which objects you want to hear status updates for.  For example, this
+# registers a handler to learn about all changes to controlled loads:
+#
+#   for output in vc.outputs:
+#     vc.subscribe(output, my_update_handler)
+#
+# Open a connection to the controller.  Spawns a second thread, which is
+# responsible for all communication with the Vantage and invokes update handlers
+# when state changes occur.
+#
+#   vc.connect();
+#
+#
+# Vantage Object    | pyvantage object | Output
+# ------------------+------------------+--------------
+# Area              | Area             | <none>
+# Load              | Output           | vc.outputs
+# DDGColorLoad      | Output           | vc.outputs
+# LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
+# Keypad            | Keypad           | vc.keypads
+# DualRelayStation  | Keypad           | vc.keypads
+# Button            | Button           | vc.buttons
+# DryContact        | Button           | vc.buttons
+# GMem              | Variable         | vc.variables
+# OmniSensor        | OmniSensor       | vc.sensors
+# LightSensor       | LightSensor      | vc.sensors
+# Task              | Task             | vc.tasks
+# MechoShade        | Shade            | vc.outputs
+# QISBlind          | Shade            | vc.outputs
+# BlindGroup        | Shade            | vc.outputs
+# QMotion           | Shade            | vc.outputs
+# Somfy             | Shade            | vc.outputs
+#
+# Config file objects which are not parsed by this module include:
+#     AreaFragment, BackBox, Category, Elk.M1_*, Enclosure, EthernetLink,
+#     FixtureDefinition, ButtonStyle, EqUXStyle, KeypadStyle, LEDStyle, Master,
+#     Module, ModuleGen2, DCPowerProfile, PowerProfile, PWMPowerProfile,
+#     Schedule, Script, SerialPort, StationPunch, Timer, User, UserGroup,
+#     WireLink, CameraWidget, LightingWidget, MediaWidget, SceneWidget,
+#     SecurityWidget, TimerWidget.
+
 import logging
 import telnetlib
 import socket
@@ -121,7 +175,7 @@ class VantageConnection(threading.Thread):
             raise
 
     def send_ascii_nl(self, cmd):
-        """Sends the specified command to the lutron controller.
+        """Sends the specified command to the vantage controller.
 
         Must not hold self._lock"""
         with self._lock:
