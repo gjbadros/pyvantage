@@ -49,7 +49,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 #
 # Vantage Object    | pyvantage object | Output
 # ------------------+------------------+--------------
-# Area              | Area             | <none>
+# Area              | Area             | Used to give names to other objects
 # Load              | Output           | vc.outputs
 # DDGColorLoad      | Output           | vc.outputs
 # LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
@@ -509,7 +509,7 @@ class VantageXmlDbParser():
             _LOGGER.warning("Error parsing lightsensor vid = %d: %s", vid, e)
 
     def _parse_shade(self, shade_xml):
-        """Parses a sahde node.
+        """Parses a shade node.
 
         Either a MechoShade.IQ2_Shade_Node_CHILD or
         QMotion.QIS_Channel_CHILD (shade) tag.
@@ -525,8 +525,12 @@ class VantageXmlDbParser():
             _LOGGER.warning("Error parsing shade vid = %d: %s", vid, e)
 
     def _parse_output(self, output_xml):
-        """Parses a load, which is generally a switch controlling a set of
-        lights/outlets, etc."""
+        """Parses a load.
+
+        A load is generally one or more lights/outlets/etc. which can be
+        switched and possibly dimmed by the controller.
+
+        """
         try:
             vid = int(output_xml.get('VID'))
             dname_xml = output_xml.find('DName')
@@ -673,7 +677,7 @@ class VantageXmlDbParser():
         return task
 
     def _parse_drycontact(self, dc_xml):
-        """Parses a button device that part of a keypad."""
+        """Parses a dry contact switch."""
         # A dry contact switch *may* be plugged into the back of a keypad (and
         # hence has a keypad like a button does), but nobody cares if it does.
         # A dry contact in other respects acts like a button, so treat it as
@@ -704,6 +708,9 @@ class VantageXmlDbParser():
             if xml_name:
                 name = xml_name.text.strip()
             if not name:
+                # You *can* give each button on each keypad a name in Design
+                # Center, but why would you bother?  If no name is present, just
+                # use the descriptive text which appears on the actual button:
                 xml_name = button_xml.find("Text1")
                 if xml_name is None:
                     return None
@@ -879,7 +886,8 @@ class Vantage():
             name += ns + "-"
 
         # TODO: this may be a little too hacky
-        # it makes sure that we use "GH-Bedroom High East"
+        # Greg Badros has a convention of naming areas using 2-letter codes.
+        # This makes sure that we use "GH-Bedroom High East"
         # instead of "GH-GH Bedroom High East"
         # since it's sometimes convenient to have the short area
         # at the start of the device name in vantage
