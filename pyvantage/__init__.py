@@ -90,7 +90,7 @@ class VantageConnection(threading.Thread):
 
     def __init__(self, host, user, password, cmd_port, recv_callback):
         """Initializes the vantage connection, doesn't actually connect."""
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, name="VantageConnection")
 
         self._host = host
         self._user = user
