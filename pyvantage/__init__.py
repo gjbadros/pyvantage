@@ -21,12 +21,74 @@ Then the component/vantage.py and its require line will work.
 __Author__ = "Greg J. Badros"
 __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 
-# TODO:
-# Handle OmniSensor elements:
-#     <Model>Temperature</Model> using getsensor (for temperature in celsius)
-#     <Model>Power</Model> using getpower (for power in watts)
-#     <Model>Current</Model> using getcurrent (for current in amps)
-
+# USAGE:
+#
+# Instantiate a Vantage controller object:
+#
+#   vc = Vantage("192.168.1.42", "myusername", "mypassword");
+#
+# Load the XML configuration file for the controller.  First tries to read
+# cache from local disk, if not available retrieves it from controller.  This
+# is then parsed to generate a Python object for every object with a VID on
+# the controller.  (See below for mapping from Vantage to pyvantage objects.)
+#
+#   vc.load_xml_db();
+#
+# Decide which objects you want to hear status updates for.  For example, this
+# registers a handler to learn about all changes to controlled loads:
+#
+#   for output in vc.outputs:
+#     vc.subscribe(output, my_update_handler)
+#
+# Open a connection to the controller.  Spawns a second thread, which is
+# responsible for all communication with the Vantage and invokes update handlers
+# when state changes occur.
+#
+#   vc.connect();
+#
+#
+# Vantage Object    | pyvantage object | Output
+# ------------------+------------------+--------------
+# Area              | Area             | Used to give names to other objects
+# Load              | Output           | vc.outputs
+# DDGColorLoad      | Output           | vc.outputs
+# LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
+# Keypad            | Keypad           | vc.keypads
+# DualRelayStation  | Keypad           | vc.keypads
+# Button            | Button           | vc.buttons
+# DryContact        | Button           | vc.buttons
+# GMem              | Variable         | vc.variables
+# OmniSensor        | OmniSensor       | vc.sensors
+# LightSensor       | LightSensor      | vc.sensors
+# Task              | Task             | vc.tasks
+# MechoShade        | Shade            | vc.outputs
+# QISBlind          | Shade            | vc.outputs
+# BlindGroup        | Shade            | vc.outputs
+# QMotion           | Shade            | vc.outputs
+# Somfy             | Shade            | vc.outputs
+#
+# Config file objects which are not parsed by this module include:
+#     AreaFragment, BackBox, Category, Elk.M1_*, Enclosure, EthernetLink,
+#     FixtureDefinition, ButtonStyle, EqUXStyle, KeypadStyle, LEDStyle, Master,
+#     Module, ModuleGen2, DCPowerProfile, PowerProfile, PWMPowerProfile,
+#     Schedule, Script, SerialPort, StationPunch, Timer, User, UserGroup,
+#     WireLink, CameraWidget, LightingWidget, MediaWidget, SceneWidget,
+#     SecurityWidget, TimerWidget.
+#
+# Things that Vantage can do which are not yet supported:
+#
+# - Beep keypads. (There no direct support for this via TCP interface that I can
+#   see.  It appears the beep function is implemented from lower-level
+#   primitives in the XML config file.)
+#
+# - Change button colors.
+#
+# - Detect double/triple/quadruple presses on buttons, or long presses. (This is
+#   also implemented from lower-level primitives in the XML config.  Clients of
+#   this library just have to count press and release events themselves).
+# 
+# - Control devices connected via serial/ethernet links, such as Elk alarms,
+#   stereo systems, etc.
 
 import logging
 import telnetlib
@@ -36,17 +98,11 @@ import time
 import base64
 import re
 import json
+import os
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
 from collections import deque
-
-
-def xml_escape(s):
-    """Escape XML meta characters '<' and '&'."""
-    answer = s.replace("<", "&lt;")
-    answer = answer.replace("&", "&amp;")
-    return answer
-
+from xml.sax.saxutils import escape
 
 def kelvin_to_level(kelvin):
     """Convert kelvin temperature to a USAI level."""
@@ -96,7 +152,7 @@ class VantageConnection(threading.Thread):
 
     def __init__(self, host, user, password, cmd_port, recv_callback):
         """Initializes the vantage connection, doesn't actually connect."""
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, name="VantageConnection")
 
         self._host = host
         self._user = user
@@ -134,7 +190,7 @@ class VantageConnection(threading.Thread):
             raise
 
     def send_ascii_nl(self, cmd):
-        """Sends the specified command to the lutron controller.
+        """Sends the specified command to the vantage controller.
 
         Must not hold self._lock"""
         with self._lock:
@@ -423,7 +479,11 @@ class VantageXmlDbParser():
         """Parses an OmniSensor tag."""
         try:
             vid = int(sensor_xml.get('VID'))
-            kind = sensor_xml.find('Model').text.lower()
+            kind = {
+                "Power"      :"power",
+                "Current"    :"current",
+                "Temperature":"sensor"
+            }[sensor_xml.find('Model').text]
             sensor = OmniSensor(self._vantage,
                                 name=sensor_xml.find('Name').text,
                                 kind=kind,
@@ -449,7 +509,7 @@ class VantageXmlDbParser():
             _LOGGER.warning("Error parsing lightsensor vid = %d: %s", vid, e)
 
     def _parse_shade(self, shade_xml):
-        """Parses a sahde node.
+        """Parses a shade node.
 
         Either a MechoShade.IQ2_Shade_Node_CHILD or
         QMotion.QIS_Channel_CHILD (shade) tag.
@@ -465,8 +525,12 @@ class VantageXmlDbParser():
             _LOGGER.warning("Error parsing shade vid = %d: %s", vid, e)
 
     def _parse_output(self, output_xml):
-        """Parses a load, which is generally a switch controlling a set of
-        lights/outlets, etc."""
+        """Parses a load.
+
+        A load is generally one or more lights/outlets/etc. which can be
+        switched and possibly dimmed by the controller.
+
+        """
         try:
             vid = int(output_xml.get('VID'))
             dname_xml = output_xml.find('DName')
@@ -613,18 +677,22 @@ class VantageXmlDbParser():
         return task
 
     def _parse_drycontact(self, dc_xml):
-        """Parses a button device that part of a keypad."""
+        """Parses a dry contact switch."""
+        # A dry contact switch *may* be plugged into the back of a keypad (and
+        # hence has a keypad like a button does), but nobody cares if it does.
+        # A dry contact in other respects acts like a button, so treat it as
+        # one.
         try:
             vid = int(dc_xml.get('VID'))
             name = dc_xml.find('Name').text + ' [C]'
             parent = dc_xml.find('Parent')
             parent_vid = int(parent.text)
-            area = -1  # TODO could try to get area for this
+            area_vid = int(dc_xml.find('Area').text)
             num = 0
             keypad = None
             _LOGGER.debug("Found DryContact with vid = %d", vid)
             # Ugh, awful -- three different ways of representing bad-value
-            button = Button(self._vantage, name, area, vid, num,
+            button = Button(self._vantage, name, area_vid, vid, num,
                             parent_vid, keypad, False)
             return button
         except Exception as e:
@@ -640,6 +708,9 @@ class VantageXmlDbParser():
             if xml_name:
                 name = xml_name.text.strip()
             if not name:
+                # You *can* give each button on each keypad a name in Design
+                # Center, but why would you bother?  If no name is present, just
+                # use the descriptive text which appears on the actual button:
                 xml_name = button_xml.find("Text1")
                 if xml_name is None:
                     return None
@@ -734,7 +805,7 @@ class Vantage():
                         'TASK', 'GETBLIND', 'BLIND', 'INVOKE', 'VARIABLE',
                         'GETLIGHT', 'GETPOWER', 'GETCURRENT',
                         'GETSENSOR', 'ADDSTATUS', 'DELSTATUS',
-                        'GETCUSTOM', 'RAMPLOAD', 'GETTEMPERATURE']
+                        'GETCUSTOM', 'RAMPLOAD']
         self._s_cmds = ['LOAD', 'TASK', 'BTN', 'VARIABLE', 'BLIND', 'STATUS']
         self.outputs = None
         self.variables = None
@@ -782,6 +853,8 @@ class Vantage():
 
         """
 
+        # First, register the VID in our _ids map.  When we issue commands to
+        # the Vantage this map lets us route the respones to the correct object:
         ids = self._ids.setdefault(cmd_type, {})
         ids = self._ids.setdefault(cmd_type2, {})
         if obj.vid in ids:
@@ -789,6 +862,12 @@ class Vantage():
         self._ids[cmd_type][obj.vid] = obj
         if cmd_type2:
             self._ids[cmd_type2][obj.vid] = obj
+
+        # Now give the object a unique name.  We prefix in reverse order the
+        # areas the object is contained in.  So an object may be called "Main
+        # Floor-Kitchen-Ceiling Can Lights".  Every object must have a unique
+        # name, if there is a duplicate then (VID) is attached to the end.
+
         lineage = self.get_lineage_from_obj(obj)
         name = ""
         # reverse all but the last element in list
@@ -807,7 +886,8 @@ class Vantage():
             name += ns + "-"
 
         # TODO: this may be a little too hacky
-        # it makes sure that we use "GH-Bedroom High East"
+        # Greg Badros has a convention of naming areas using 2-letter codes.
+        # This makes sure that we use "GH-Bedroom High East"
         # instead of "GH-GH Bedroom High East"
         # since it's sometimes convenient to have the short area
         # at the start of the device name in vantage
@@ -828,6 +908,7 @@ class Vantage():
         self._names[obj.name] = obj.vid
 
     # TODO: update this to handle async status updates
+    # Note: invoked on VantageConnection thread.
     def _recv(self, line):
         """Invoked by the connection manager to process incoming data."""
         _LOGGER.debug("_recv got line: %s", line)
@@ -864,8 +945,7 @@ class Vantage():
         # below
         if line[0] == 'R' and cmd_type in ('STATUS', 'ADDSTATUS',
                                            'DELSTATUS', 'INVOKE',
-                                           'GETCUSTOM', 'RAMPLOAD',
-                                           'GETTEMPERATURE'):
+                                           'GETCUSTOM', 'RAMPLOAD'):
             return
         if line[0] == 'R' and cmd_type == "ERROR":
             _LOGGER.warning("Vantage %s on command: %s", line,
@@ -905,6 +985,7 @@ class Vantage():
                                   'VARIABLE', 'SENSOR', 'LIGHT'))):
                 self.handle_update_and_notify(obj, args)
 
+    # Note: invoked on VantageConnection thread.
     def handle_update_and_notify(self, obj, args):
         """Call handle_update for the obj and for subscribers."""
         handled = obj.handle_update(args)
@@ -976,9 +1057,9 @@ class Vantage():
         else:
             _LOGGER.warning("No task with name = %s", name)
 
-    def load_xml_db(self, disable_cache=False):
+    def load_xml_db(self, disable_cache=False, config_dir="./"):
         """Load the Vantage database from the server."""
-        filename = self._host + "_config.txt"
+        filename = os.path.join(config_dir, self._host + "_config.txt")
         xml_db = ""
         success = False
         if not disable_cache:
@@ -1002,8 +1083,8 @@ class Vantage():
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
                          "</call></Login></ILogin>\n"
-                         % (xml_escape(self._user),
-                            xml_escape(self._password))).encode("ascii"))
+                         % (escape(self._user),
+                            escape(self._password))).encode("ascii"))
                 response = ""
                 while not response.endswith("</ILogin>\n"):
                     response += ts.recv(4096).decode('ascii')
