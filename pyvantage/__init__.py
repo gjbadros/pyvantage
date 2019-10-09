@@ -86,7 +86,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 # - Detect double/triple/quadruple presses on buttons, or long presses. (This is
 #   also implemented from lower-level primitives in the XML config.  Clients of
 #   this library just have to count press and release events themselves).
-# 
+#
 # - Control devices connected via serial/ethernet links, such as Elk alarms,
 #   stereo systems, etc.
 
@@ -99,10 +99,12 @@ import base64
 import re
 import json
 import os
-from colormath.color_objects import sRGBColor, HSVColor
-from colormath.color_conversions import convert_color
+
 from collections import deque
 from xml.sax.saxutils import escape
+
+from colormath.color_objects import sRGBColor, HSVColor
+from colormath.color_conversions import convert_color
 
 def kelvin_to_level(kelvin):
     """Convert kelvin temperature to a USAI level."""
@@ -642,22 +644,23 @@ class VantageXmlDbParser():
         vid = int(vid)
 
         load_vids = []
-        dmx_color = True
+        color_vids = []
+        # set dmx_color to True iff at least one load supports color
+        dmx_color = False
         for load in loads:
             v = int(load.text)
             load_vids.append(v)
-            if not self.vid_to_load[v]._dmx_color:
-                dmx_color = False
-            else:
-                _LOGGER.warning("for loadgroup %d, vid %s supports color",
-                                vid, v)
+            if self.vid_to_load[v]._dmx_color:
+                dmx_color = True
+                color_vids.append(v)
 
         output = LoadGroup(self._vantage,
                            name=out_name,
                            area=area_vid,
                            load_vids=load_vids,
                            dmx_color=dmx_color,
-                           vid=vid)
+                           vid=vid,
+                           color_vids=color_vids)
         return output
 
     def _parse_keypad(self, keypad_xml):
@@ -697,7 +700,7 @@ class VantageXmlDbParser():
             return button
         except Exception as e:
             _LOGGER.warning("Error parsing drycontact vid = %d: %s",
-                            vid, e)        
+                            vid, e)
 
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
@@ -800,6 +803,7 @@ class Vantage():
         self._vid_to_shade = {}  # copied out from the parser
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {}  # copied out from the parser
+        self._colorvid_to_group_vid = {}
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'GETVARIABLE',
                         'ERROR',
                         'TASK', 'GETBLIND', 'BLIND', 'INVOKE', 'VARIABLE',
@@ -1482,21 +1486,31 @@ class Output(VantageEntity):
             self._query_waiters.notify()
         else:
             if args[0] == 'RGBLoad.GetRGB':
-                _LOGGER.warning("RGBLoad.GetRGB, handling vid = %d; "
-                                "RGBW %s %s",
-                                self._vid, args[1], args[2])
+                _LOGGER.info("RGBLoad.GetRGB, handling vid = %d; "
+                             "RGBW %s %s",
+                             self._vid, args[1], args[2])
                 val = int(args[1])
                 char = int(args[2])
                 if char < 3:
                     self._rgb[char] = val
                 if char == 2:
                     self._query_waiters.notify()
+                gvid = self._vantage._colorvid_to_group_vid.get(self._vid)
+                if gvid:
+                    group = self._vantage._vid_to_load[gvid]
+                    if char < 3:
+                        group._rgb[char] = val
+                    if char == 2:
+                        group._query_waiters.notify()
         return self
 
     # TODO: It appears that after 64 ADDSTATUS calls, they start
     # failing with ERROR:12 "Failed"
     # Thus, we may need to ADDSTATUS and DELSTATUS and track which
     # color lights have their status tracked....
+    # Or perhaps better, we could open a second connection to vantage
+    # for the additional ADDSTATUS calls since the limit appears to be
+    # a per-connection limit.
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
         output. For pure on/off loads the result is either 0.0 or 100.0."""
@@ -1747,11 +1761,17 @@ class Button(VantageSensor):
 
 class LoadGroup(Output):
     """Represent a Vantage LoadGroup."""
-    def __init__(self, vantage, name, area, load_vids, dmx_color, vid):
+    def __init__(self, vantage, name, area, load_vids, dmx_color, vid, color_vids):
         """Initialize a load group"""
         super(LoadGroup, self).__init__(
             vantage, name, area, 'GROUP', 'GROUP', None, dmx_color, vid)
         self._load_vids = load_vids
+        self._color_vids = color_vids
+        if not self._is_dimmable:
+            for v in load_vids:
+                if self._vantage._vid_to_load[v]._is_dimmable:
+                    self._is_dimmable = True
+                    break
 
     def __str__(self):
         """Returns a pretty-printed string for this object."""
@@ -1764,6 +1784,34 @@ class LoadGroup(Output):
                     ("(color) " if self.support_color else ""),
                     self._load_vids,
                     self.full_lineage))
+
+    # this needs to invoke RGBLoad for each color_vids
+    def _update_rgb(self):
+        """Update the RGB of the light to self._rgb"""
+        (r, g, b) = self._rgb
+        ratio = self._level/100
+        # Vantage does not support setting color on a group VID
+        # via RGBLoad.SetRGBW, so we have to do it ourselves
+        # on each of the group members that supports color
+        for v in self._color_vids:
+            self._vantage.send("INVOKE", v,
+                               ("RGBLoad.SetRGBW %d %d %d %d" %
+                                (r*ratio, g*ratio, b*ratio, 0)))
+
+    def __do_query_level(self):
+        """Helper to perform the actual query the current dimmer level of the
+        output. For pure on/off loads the result is either 0.0 or 100.0."""
+        if self.support_color and not self._addedstatus:
+            _LOGGER.debug("Using first color_vid = %s to ADDSTATUS for %s",
+                          self._color_vids[0], self._vid)
+            # it appears to be ok to have ADDSTATUS called multiple times on
+            # the same vid and it only counts 1 towards the 64 limit per
+            # connection
+            self._vantage._colorvid_to_group_vid[self._color_vids[0]] = self._vid
+            self._vantage.send("ADDSTATUS", self._color_vids[0])
+            self._addedstatus = True
+        _LOGGER.debug("getload of %s", self._vid)
+        self._vantage.send("GETLOAD", self._vid)
 
 
 class Keypad(VantageSensor):
