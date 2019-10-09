@@ -106,6 +106,7 @@ from xml.sax.saxutils import escape
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
 
+
 def kelvin_to_level(kelvin):
     """Convert kelvin temperature to a USAI level."""
     if kelvin < 2200:
@@ -136,17 +137,14 @@ _LOGGER = logging.getLogger(__name__)
 
 class VantageException(Exception):
     """Top level module exception."""
-    pass
 
 
 class VIDExistsError(VantageException):
     """Asserted when registerering a duplicate integration id."""
-    pass
 
 
 class ConnectionExistsError(VantageException):
     """Raised when a connection already exists (e.g. two connect() calls)."""
-    pass
 
 
 class VantageConnection(threading.Thread):
@@ -261,11 +259,11 @@ class VantageConnection(threading.Thread):
             self._recv_cb(line.decode('ascii').rstrip())
 
 
-def _desc_from_t1t2(t1, t2):
-    if not t2:
-        desc = t1 or ''
+def _desc_from_t1t2(title1, title2):
+    if not title2:
+        desc = title1 or ''
     else:
-        desc = t1 + ' ' + t2
+        desc = title1 + ' ' + title2
     return desc.strip()
 
 
@@ -577,6 +575,7 @@ class VantageXmlDbParser():
                                  area_name, area_vid)
                     self.vid_to_load[load_vid].color_control_vid = vid
                 else:
+
                     # TODO: do not assume that the regular loads are
                     # handled before the COLOR loads
                     _LOGGER.warning("Could not find matching load for "
@@ -650,7 +649,7 @@ class VantageXmlDbParser():
         for load in loads:
             v = int(load.text)
             load_vids.append(v)
-            if self.vid_to_load[v]._dmx_color:
+            if self.vid_to_load[v].support_color:
                 dmx_color = True
                 color_vids.append(v)
 
@@ -911,8 +910,7 @@ class Vantage():
                                 oldname, obj.name)
         self._names[obj.name] = obj.vid
 
-    # TODO: update this to handle async status updates
-    # Note: invoked on VantageConnection thread.
+     # Note: invoked on VantageConnection thread.
     def _recv(self, line):
         """Invoked by the connection manager to process incoming data."""
         _LOGGER.debug("_recv got line: %s", line)
@@ -924,7 +922,7 @@ class Vantage():
         if line[0] == 'R':
             cmds = self._r_cmds
             typ = 'R'
-            if len(self._cmds) > 0:
+            if self._cmds:
                 this_cmd = self._cmds.popleft()
             else:
                 this_cmd = "__UNDERFLOW__"
@@ -1144,6 +1142,7 @@ class Vantage():
         self.do_parse(xml_db)
 
     def do_parse(self, xml_db):
+        """Call the parser and copy its output here."""
         parser = VantageXmlDbParser(vantage=self, xml_db_str=xml_db)
         self._vid_to_load = parser.vid_to_load
         self._vid_to_variable = parser.vid_to_variable
@@ -1239,6 +1238,7 @@ class VantageEntity:
         self._extra_info = {}
 
     def needs_poll(self):
+        """Does not poll by default."""
         return False
 
     @property
