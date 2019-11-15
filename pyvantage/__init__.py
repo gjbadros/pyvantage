@@ -826,6 +826,9 @@ class Vantage():
 
         """
 
+        if obj in self._subscribers:
+            _LOGGER.warning("Replacing existing handler for '%s'", obj.name)
+
         self._subscribers[obj] = handler
 
     def get_lineage_from_obj(self, obj):
@@ -1741,8 +1744,21 @@ class Button(VantageSensor):
 
         """
         action = args[0]
-        _LOGGER.debug("Button %d(%s): action=%s params=%s",
-                      self._vid, self._name, action, args[1:])
+        time_of_click = time.time()
+
+        _LOGGER.debug("Button %d(%s): action=%s params=%s time=%s",
+                      self._vid, self._name, action, args[1:], time_of_click)
+
+        # Home Assistant needs to track exactly when buttons are
+        # pressed/released so it can detect double/triple/quadruple button
+        # presses.  Ideally the Vantage Controller would tell us (using its own
+        # clock) when the button was pressed, to avoid jitter being introduced
+        # by our TCP connection to the controller.  Sadly, the protocol does not
+        # support that.  So instead, we tag button events with the time here,
+        # before handing the event off to another thread for handling (which can
+        # introduce its own lag and jitter):
+        self._extra_info['last_changed_timestamp'] = time_of_click
+
         if self._keypad:  # it's a button
             self._value = action
             # this transfers control to Keypad.handle_update(...)
