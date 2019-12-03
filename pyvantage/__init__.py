@@ -577,21 +577,25 @@ class VantageXmlDbParser():
         vid = int(vid)
 
         load_vids = []
-        dmx_color = True
+        dmx_color = False
+        support_color_temp = False
         for load in loads:
             v = int(load.text)
             load_vids.append(v)
-            if not self.vid_to_load[v]._dmx_color:
-                dmx_color = False
-            else:
-                _LOGGER.warning("for loadgroup %d, vid %s supports color",
-                                vid, v)
+            if self.vid_to_load[v]._dmx_color:
+                dmx_color = True
+                _LOGGER.debug("for loadgroup %d, vid %s supports color", vid, v)
+            if self.vid_to_load[v].support_color_temp:
+                support_color_temp = True
+                _LOGGER.debug("for loadgroup %d, vid %s supports color_temp", vid, v)
+
 
         output = LoadGroup(self._vantage,
                            name=out_name,
                            area=area_vid,
                            load_vids=load_vids,
                            dmx_color=dmx_color,
+                           support_color_temp=support_color_temp,
                            vid=vid)
         return output
 
@@ -628,7 +632,7 @@ class VantageXmlDbParser():
             return button
         except Exception as e:
             _LOGGER.warning("Error parsing drycontact vid = %d: %s",
-                            vid, e)        
+                            vid, e)
 
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
@@ -1013,8 +1017,8 @@ class Vantage():
                         "Could not find response code from controller "
                         "upon login attempt, response = " + response)
                 if m.group(1) != "true":
-                    raise Exception("Login failed, return code is: " +
-                                    m.group(1))
+                    raise Exception("Login failed or not accepted,"
+                                    " return code is: " + m.group(1))
             _LOGGER.info("sent GetFile request")
             ts.send("<IBackup><GetFile><call>Backup\\Project.dc"
                     "</call></GetFile></IBackup>\n".encode("ascii"))
@@ -1033,7 +1037,8 @@ class Vantage():
                 exit(-1)
             except socket.timeout:
                 ts.close()
-            _LOGGER.debug("done reading")
+            _LOGGER.debug("done reading, size = %s", len(response))
+
             response = response.decode('ascii')
             response = response[response.find("</Result>\n")+10:]
             response = response.replace('<?File Encode="Base64" /', '')
@@ -1041,6 +1046,9 @@ class Vantage():
             response = response[:response.find('</return>')]
             dbytes = base64.b64decode(response)
             xml_db = dbytes.decode('utf-8')
+            if len(xml_db) < 1000:
+                _LOGGER.warning("Downloaded short .dc file; "
+                                " check saved cache file on disk")
             try:
                 f = open(filename, "w")
                 f.write(xml_db)
@@ -1339,13 +1347,14 @@ class Output(VantageEntity):
         """Returns a pretty-printed string for this object."""
         return (
             "Output name: '%s' area: %d type: '%s' load: '%s' "
-            "vid: %d @ %s %s%s%s%s [%s]" % (
+            "vid: %d @ %s %s%s%s%s%s [%s]" % (
                 self._name, self._area, self._output_type,
                 self._load_type, self._vid, self._level,
                 ("# " if self._rgb_is_dirty else ""),
                 ("(dim) " if self.is_dimmable else ""),
                 ("(ctemp) " if self.support_color_temp else ""),
                 ("(color) " if self.support_color else ""),
+                ("(dirty) " if self._rgb_is_dirty else ""),
                 self.full_lineage))
 
     def __repr__(self):
@@ -1354,12 +1363,15 @@ class Output(VantageEntity):
                     'type': self._load_type, 'load': self._load_type,
                     'supports':
                     ("ctemp " if self.support_color_temp else "") +
-                    ("color " if self.support_color else "")})
+                    ("color " if self.support_color else "") +
+                    ("dirty " if self._rgb_is_dirty else "")})
 
     @property
     def simple_name(self):
         """Return a simple pretty-printed string for this object."""
-        return 'VID:%d (%s) [%s]' % (self._vid, self._name, self._load_type)
+        return 'VID:%d (%s) [%s]%s' % (
+            self._vid, self._name, self._load_type,
+            " [dirty]" if self._rgb_is_dirty else "")
 
     # ADDSTATUS
     # DELSTATUS
@@ -1394,6 +1406,11 @@ class Output(VantageEntity):
             _LOGGER.debug("Updating brightness %d(%s): l=%f",
                           self._vid, self._name, level)
             self._level = level
+            # when vantage changes the level itself (e.g., from a keypad)
+            # we may have to update the RGB (or RGB_DW) color while processing
+            # that status message
+            if level > 0 and self._rgb_is_dirty:
+                self._invoke_rgb()
             self._query_waiters.notify()
         else:
             if args[0] == 'RGBLoad.GetRGB':
@@ -1453,7 +1470,7 @@ class Output(VantageEntity):
         self._level = new_level
         _LOGGER.debug("level setter: %s", self)
         if self._rgb_is_dirty:
-            self._update_rgb()
+            self._invoke_rgb()
 
         if self._is_dimmable:
             if new_level == 0:
@@ -1472,9 +1489,9 @@ class Output(VantageEntity):
     @rgb.setter
     def rgb(self, new_rgb):
         """Sets new color for the light."""
-        if self._level == 0:
-            self._rgb_is_dirty = True
         if self._rgb == new_rgb:
+            if self._rgb_is_dirty:
+                self._invoke_rgb()
             return
         # we need to adjust the rgb values to take into account the level
         _LOGGER.debug("%s: rgb = %s", self,
@@ -1484,16 +1501,18 @@ class Output(VantageEntity):
         hs_color = convert_color(srgb, HSVColor)
         self._hs = [hs_color.hsv_h, hs_color.hsv_s]
         self._rgb = new_rgb
-        self._update_rgb()
-#        self._rgb_is_dirty = (self._level == 0)
+        self._rgb_is_dirty = True
+        self._invoke_rgb()
 
-    def _update_rgb(self):
+    def _invoke_rgb(self):
         """Update the RGB of the light to self._rgb"""
         (r, g, b) = self._rgb
         ratio = self._level/100
         self._vantage.send("INVOKE", self._vid,
                            ("RGBLoad.SetRGBW %d %d %d %d" %
                             (r*ratio, g*ratio, b*ratio, 0)))
+        if self._level > 0:
+            self._rgb_is_dirty = False
 
     @property
     # hue is scaled 0-360, saturation is 0-100
@@ -1508,13 +1527,10 @@ class Output(VantageEntity):
             return
         _LOGGER.debug("%s: hs = %s", self,
                       json.dumps(new_hs))
+        self._hs = new_hs
         hs_color = HSVColor(new_hs[0], new_hs[1], 1.0)
         rgb = convert_color(hs_color, sRGBColor)
-        self._vantage.send("INVOKE", self._vid,
-                           "RGBLoad.SetRGBW %d %d %d %d" %
-                           (rgb.rgb_r, rgb.rgb_g, rgb.rgb_b, 0))
-        self._rgb = [rgb.rgb_r, rgb.rgb_g, rgb.rgb_b]
-        self._hs = new_hs
+        self.rgb = [rgb.rgb_r, rgb.rgb_g, rgb.rgb_b]
 
     @property
     def color_temp(self):
@@ -1530,9 +1546,9 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.debug("%s: Ignoring call to setter for color_temp "
-                          "of dmx_color light",
-                          self)
+            _LOGGER.warning("%s: Ignoring call to setter for color_temp "
+                            "of dmx_color light",
+                            self)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp),
@@ -1662,23 +1678,46 @@ class Button(VantageSensor):
 
 class LoadGroup(Output):
     """Represent a Vantage LoadGroup."""
-    def __init__(self, vantage, name, area, load_vids, dmx_color, vid):
+    def __init__(self, vantage, name, area, load_vids, dmx_color,
+                 support_color_temp, vid):
         """Initialize a load group"""
         super(LoadGroup, self).__init__(
             vantage, name, area, 'GROUP', 'GROUP', None, dmx_color, vid)
         self._load_vids = load_vids
+        self._support_color_temp = support_color_temp
+
+    @property
+    def support_color_temp(self):
+        """Returns true iff this load can be set to a color temperature."""
+        return self._support_color_temp
 
     def __str__(self):
         """Returns a pretty-printed string for this object."""
         return ("Output name: '%s' area: %d type: '%s' load: '%s' "
-                "id: %d %s%s%s (%s) [%s]" % (
+                "id: %d %s%s%s%s (%s) [%s]" % (
                     self._name, self._area, self._output_type,
                     self._load_type, self._vid,
                     ("(dim) " if self.is_dimmable else ""),
                     ("(ctemp) " if self.support_color_temp else ""),
                     ("(color) " if self.support_color else ""),
+                    ("(dirty) " if self._rgb_is_dirty else ""),
                     self._load_vids,
                     self.full_lineage))
+
+    # Load Groups do not respond to RGBLoad.SetRGBW invocations
+    # so we need to call them for each of the member groups that do
+    def _invoke_rgb(self):
+        """Update the RGB of the load group to self._rgb"""
+        (r, g, b) = self._rgb
+        ratio = self._level/100
+        for vid in self._load_vids:
+            load = self._vantage._vid_to_load.get(vid)
+            if load and (load._dmx_color or load._load_type == "DW"):
+                self._vantage.send("INVOKE", vid,
+                                   ("RGBLoad.SetRGBW %d %d %d %d" %
+                                    (r*ratio, g*ratio, b*ratio, 0)))
+        if self._level > 0:
+            self._rgb_is_dirty = False
 
 
 class Keypad(VantageSensor):
