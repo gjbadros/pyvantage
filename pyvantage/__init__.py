@@ -1730,6 +1730,16 @@ class Button(VantageSensor):
         """Returns the button number."""
         return self._num
 
+    @property
+    def keypad_name(self):
+        """Returns the name of the keypad which contains this button."""
+        return self._keypad.name
+
+    @property
+    def keypad_vid(self):
+        """Returns the VID of the keypad which contains this button."""
+        return self._parent
+
     def handle_update(self, args):
         """The callback invoked by the main event loop.
 
