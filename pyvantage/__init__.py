@@ -1100,10 +1100,10 @@ class Vantage():
                         "upon login attempt, response = " + response)
                 if m.group(1) != "true":
                     raise Exception("Login failed or not accepted,"
-                                    " return code is: " m.group(1) +
-                                    '. Specified user must be in group Admin '
-                                    'and have "Read State", and '
-                                    '"Read Config" permissions')
+                                    " return code is: " + m.group(1) +
+                                    ". Specified user must be in group Admin"
+                                    " and have 'Read State', and"
+                                    " 'Read Config' permissions.")
             _LOGGER.info("sent GetFile request")
             ts.send("<IBackup><GetFile><call>Backup\\Project.dc"
                     "</call></GetFile></IBackup>\n".encode("ascii"))
