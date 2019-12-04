@@ -1836,7 +1836,6 @@ class LoadGroup(Output):
             self._addedstatus = True
         _LOGGER.debug("getload of %s", self._vid)
         self._vantage.send("GETLOAD", self._vid)
->>>>>>> 455605a6ac1b08ef8d31e8dcd07cba0083de74c9
 
 
 class Keypad(VantageSensor):
