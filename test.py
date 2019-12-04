@@ -72,6 +72,9 @@ def various_tests(v):
     time.sleep(2)
     print("ls = " + str(ls.value))
     print("los = " + str(los.value))
+    ll = v._vid_to_load[4727]
+    ll.level = 100
+    ll.rgb = [100,20,20]
 
 
 def main():
