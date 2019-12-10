@@ -731,6 +731,11 @@ class VantageXmlDbParser():
             name = ""
             if xml_name is not None:
                 name = xml_name.text.strip()
+                # By default Design Center names each button on a keypad "Button
+                # 1", "Button 2", etc.  This is not useful.  So if a user has
+                # those names, treat it as no name:
+                if name.startswith("Button "):
+                    name = ""
             if not name:
                 # You *can* give each button on each keypad a name in Design
                 # Center, but why would you bother?  If no name is present, just
