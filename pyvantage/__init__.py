@@ -50,6 +50,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 # Vantage Object    | pyvantage object | Output
 # ------------------+------------------+--------------
 # Area              | Area             | Used to give names to other objects
+# IRZone            | Area             | Used to give names to other objects
 # Load              | Output           | vc.outputs
 # DDGColorLoad      | Output           | vc.outputs
 # LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
@@ -335,6 +336,12 @@ class VantageXmlDbParser():
             _LOGGER.debug("Area = %s", area)
             self.vid_to_area[area.vid] = area
 
+        irzones = root.findall(".//Objects//IRZone[@VID]")
+        for irzone_xml in irzones:
+            area = self._parse_irzone(irzone_xml)
+            _LOGGER.debug("IRZone = %s", area)
+            self.vid_to_area[area.vid] = area
+
         loads = root.findall(".//Objects//Load[@VID]")
         loads = loads + root.findall(".//Objects//Vantage.DDGColorLoad[@VID]")
         for load_xml in loads:
@@ -463,6 +470,19 @@ class VantageXmlDbParser():
             return area
         except Exception as e:
             _LOGGER.warning("Error parsing Area vid = %d: %s", vid, e)
+
+    def _parse_irzone(self, irzone_xml):
+        """Parses an IRZone tag, which we treat like an area with no parent."""
+        try:
+            vid = int(irzone_xml.get('VID'))
+            irzone = Area(self._vantage,
+                          name=irzone_xml.find('Name').text,
+                          parent=0,
+                          vid=vid,
+                          note=irzone_xml.find('Note').text)
+            return irzone
+        except Exception as e:
+            _LOGGER.warning("Error parsing IRZone vid = %d: %s", vid, e)
 
     def _parse_variable(self, var_xml):
         """Parses a variable (GMem) tag."""
@@ -709,7 +729,7 @@ class VantageXmlDbParser():
             vid = int(button_xml.get('VID'))
             xml_name = button_xml.find('Name')
             name = ""
-            if xml_name:
+            if xml_name is not None:
                 name = xml_name.text.strip()
             if not name:
                 # You *can* give each button on each keypad a name in Design
@@ -732,14 +752,21 @@ class VantageXmlDbParser():
             num = int(parent.get('Position'))
             keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
             if keypad is None:
-                _LOGGER.info("No parent vid = %d for button vid = %d "
-                             "(leaving button out)",
-                             parent_vid, vid)
-                return None
-            area = keypad.area
-            button = Button(self._vantage, name, area, vid, num, parent_vid,
-                            keypad, desc)
-            keypad.add_button(button)
+                irzone = self.vid_to_area.get(parent_vid)
+                if irzone is None:
+                    _LOGGER.info("No parent vid = %d for button vid = %d "
+                                 "(leaving button out)",
+                                 parent_vid, vid)
+                    return None
+
+                button = Button(self._vantage, name, irzone.vid, vid, num,
+                                parent_vid, keypad, desc)
+
+            else:
+                area = keypad.area
+                button = Button(self._vantage, name, area, vid, num,
+                                parent_vid, keypad, desc)
+                keypad.add_button(button)
             return button
         except Exception as e:
             _LOGGER.warning("Error parsing button vid = %d: %s",
