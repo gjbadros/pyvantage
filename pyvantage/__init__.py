@@ -150,7 +150,8 @@ class ConnectionExistsError(VantageException):
 class VantageConnection(threading.Thread):
     """Encapsulates the connection to the Vantage controller."""
 
-    def __init__(self, host, user, password, cmd_port, recv_callback):
+    def __init__(self, host, user, password, cmd_port, recv_callback,
+                 commdebug=True):
         """Initializes the vantage connection, doesn't actually connect."""
         threading.Thread.__init__(self, name="VantageConnection")
 
@@ -164,6 +165,7 @@ class VantageConnection(threading.Thread):
         self._connect_cond = threading.Condition(lock=self._lock)
         self._recv_cb = recv_callback
         self._done = False
+        self._commdebug = commdebug
 
         self.setDaemon(True)
 
@@ -182,7 +184,13 @@ class VantageConnection(threading.Thread):
     def _send_ascii_nl_locked(self, cmd):
         """Sends the specified command to the vantage controller.
         Assumes lock is held."""
-        _LOGGER.debug("Vantage send_ascii_nl: %s", cmd)
+        if self._commdebug:
+            if cmd.startswith("LOGIN"):
+                pass
+            elif cmd.startswith("GET"):
+                _LOGGER.debug("Vantage send_ascii_nl: %s", cmd)
+            else:
+                _LOGGER.info("Vantage send_ascii_nl: %s", cmd)
         try:
             self._telnet.write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
@@ -551,7 +559,8 @@ class VantageXmlDbParser():
             output_type = 'LIGHT'
 
             # TODO: find a better heuristic so that on/off lights still show up
-            if load_type == 'High Voltage Relay':  # 'Low Voltage Relay'
+            if (load_type == 'High Voltage Relay'
+                or load_type == 'Low Voltage Relay'):
                 output_type = 'RELAY'
 
             if ' COLOR' in out_name and load_type != 'HID':
