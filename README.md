@@ -2,14 +2,28 @@ pyvantage
 =========
 A simple Python library for controlling a Vantage Controls system for lighting, etc.
 
-This started by copying pylutron under the MIT License on 2018-02-11 from https://github.com/thecynic/pylutron.
+The very first version of this started by copying pylutron under the
+MIT License on 2018-02-11 from https://github.com/thecynic/pylutron.
+It has evolved massively since then.
+
 Updated for shades on 2018-08-20
+Updated for multiple telnet connections on 2019-12-11
+
+(See git version history for details.)
 
 Authors
 -------
-Greg Badros (gjbadros on github) built this package for the Vantage Controller lighting systems.
 
-Dima Zavin (thecynic on github) wrote pylutron, on which this was originally based.
+Greg Badros (gjbadros on github) built this package for the Vantage
+Controller lighting systems.  He is the primary author and maintainer
+and welcomes contributions, including of Design Center .dc files for
+testing purposes.
+
+Chris Colohan (colohan on github) has made several improvements and
+contributions including around button press handling.
+
+Dima Zavin (thecynic on github) wrote pylutron, on which this was
+originally based.
 
 
 

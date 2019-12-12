@@ -151,7 +151,7 @@ class VantageConnection(threading.Thread):
     """Encapsulates the connection to the Vantage controller."""
 
     def __init__(self, host, user, password, cmd_port, recv_callback,
-                 commdebug=True):
+                 commdebug=True, num_connections=2):
         """Initializes the vantage connection, doesn't actually connect."""
         threading.Thread.__init__(self, name="VantageConnection")
 
@@ -159,8 +159,10 @@ class VantageConnection(threading.Thread):
         self._user = user
         self._password = password
         self._cmd_port = cmd_port
-        self._telnet = None
-        self._connected = False
+        self._num_connections = num_connections
+        self._telnet = [None] * num_connections
+        self._connected = [False] * num_connections
+        self._iconn = 0  # index into the _telnet array
         self._lock = threading.RLock()
         self._connect_cond = threading.Condition(lock=self._lock)
         self._recv_cb = recv_callback
@@ -171,28 +173,30 @@ class VantageConnection(threading.Thread):
 
     def connect(self):
         """Connects to the vantage controller."""
-        if self._connected or self.is_alive():
+        if all(self._connected) or self.is_alive():
             raise ConnectionExistsError("Already connected")
         # After starting the thread we wait for it to post us
         # an event signifying that connection is established. This
         # ensures that the caller only resumes when we are fully connected.
-        self.start()
+        self.start()  # ultimately calls run()
         with self._lock:
-            self._connect_cond.wait_for(lambda: self._connected)
+            _LOGGER.debug("Waiting for all connections")
+            self._connect_cond.wait_for(lambda: all(self._connected))
+            _LOGGER.debug("All connected!")
 
     # VantageConnection
-    def _send_ascii_nl_locked(self, cmd):
+    def _send_ascii_nl_locked(self, cmd, i):
         """Sends the specified command to the vantage controller.
         Assumes lock is held."""
         if self._commdebug:
             if cmd.startswith("LOGIN"):
                 pass
             elif cmd.startswith("GET"):
-                _LOGGER.debug("Vantage send_ascii_nl: %s", cmd)
+                _LOGGER.debug("Vantage #%s send_ascii_nl: %s", i, cmd)
             else:
-                _LOGGER.info("Vantage send_ascii_nl: %s", cmd)
+                _LOGGER.info("Vantage #%s send_ascii_nl: %s", i, cmd)
         try:
-            self._telnet.write(cmd.encode('ascii') + b'\r\n')
+            self._telnet[self._iconn].write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected")
             raise
@@ -202,58 +206,69 @@ class VantageConnection(threading.Thread):
 
         Must not hold self._lock"""
         with self._lock:
-            self._send_ascii_nl_locked(cmd)
+            self._send_ascii_nl_locked(cmd, self._iconn)
+            if not cmd.startswith("GET"):
+                self._iconn = (self._iconn + 1) % self._num_connections
 
-    def _do_login_locked(self):
+    def _do_login_locked(self, i):
         """Executes the login procedure (telnet) as well as setting up some
         connection defaults like turning off the prompt, etc."""
         while True:
             try:
-                self._telnet = telnetlib.Telnet(self._host, self._cmd_port)
+                self._telnet[i] = telnetlib.Telnet(self._host, self._cmd_port)
                 break
             except Exception as e:
-                _LOGGER.warning("Could not connect to %s:%d, "
-                                "retrying after 3 sec (%s)",
+                _LOGGER.warning("Could not connect #%s to %s:%d, "
+                                "retrying after 3 sec (%s)", i,
                                 self._host, self._cmd_port,
                                 e)
                 time.sleep(3)
                 continue
         if not (self._user is None or self._password is None):
+            _LOGGER.debug("Connection #%s is made, logging in", i)
             self._send_ascii_nl_locked("LOGIN " + self._user +
-                                       " " + self._password)
-            self._telnet.read_until(b'\r\n')
-        self._send_ascii_nl_locked("STATUS LOAD")
-        self._telnet.read_until(b'\r\n')
-        self._send_ascii_nl_locked("STATUS BLIND")
-        self._telnet.read_until(b'\r\n')
-        self._send_ascii_nl_locked("STATUS BTN")
-        self._telnet.read_until(b'\r\n')
-        self._send_ascii_nl_locked("STATUS VARIABLE")
+                                       " " + self._password, i)
+            _LOGGER.debug("reading login response for #%s", i)
+        if i == 0:
+            self._send_ascii_nl_locked("STATUS LOAD", i)
+            self._telnet[i].read_until(b'\r\n', 2)
+            self._send_ascii_nl_locked("STATUS BLIND", i)
+            self._telnet[i].read_until(b'\r\n', 2)
+            self._send_ascii_nl_locked("STATUS BTN", i)
+            self._telnet[i].read_until(b'\r\n', 2)
+            self._send_ascii_nl_locked("STATUS VARIABLE", i)
+            self._telnet[i].read_until(b'\r\n', 2)
         return True
 
     def _disconnect_locked(self):
-        self._connected = False
+        self._connected = [False] * self._num_connections
         self._connect_cond.notify_all()
-        self._telnet = None
+        self._telnet = [None] * self._num_connections
         _LOGGER.warning("Disconnected")
 
     def _maybe_reconnect(self):
         """Reconnects to controller if we have been previously disconnected."""
+        need_notify = False
         with self._lock:
-            if not self._connected:
-                _LOGGER.info("Connecting to %s", self._host)
-                self._do_login_locked()
-                self._connected = True
+            for i in range(0, self._num_connections):
+                if not self._connected[i]:
+                    _LOGGER.info("Connecting #%s to %s", i, self._host)
+                    self._do_login_locked(i)
+                    self._connected[i] = True
+                    need_notify = True
+                    _LOGGER.info("Connected #%s", i)
+            if need_notify:
+                _LOGGER.debug("maybe_reconnect: notify_all")
                 self._connect_cond.notify_all()
-                _LOGGER.info("Connected")
 
     def run(self):
         """Main thread to maintain connection and receive remote status."""
         _LOGGER.debug("VantageConnection run started")
+        i = 0
         while True:
             self._maybe_reconnect()
             try:
-                line = self._telnet.read_until(b"\n")
+                line = self._telnet[i].read_until(b"\n")
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:
@@ -264,7 +279,8 @@ class VantageConnection(threading.Thread):
                 with self._lock:
                     self._disconnect_locked()
                 continue
-            self._recv_cb(line.decode('ascii').rstrip())
+            self._recv_cb(line.decode('ascii').rstrip(), i)
+            i = (i + 1) % self._num_connections
 
 
 def _desc_from_t1t2(title1, title2):
@@ -784,7 +800,8 @@ class Vantage():
     def __init__(self, host, user, password,
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
-                 name_mappings=None, filename=None):
+                 name_mappings=None, filename=None,
+                 commdebug=True, num_connections=1):
         """Initializes the Vantage object. No connection is made to the remote
         device."""
         self._host = host
@@ -793,7 +810,7 @@ class Vantage():
         self._name = None
         if self._host is not None:
             self._conn = VantageConnection(host, user, password, cmd_port,
-                                           self._recv)
+                                           self._recv, commdebug, num_connections)
         else:
             self._conn = None
             if filename is None:
@@ -922,9 +939,9 @@ class Vantage():
         self._names[obj.name] = obj.vid
 
      # Note: invoked on VantageConnection thread.
-    def _recv(self, line):
+    def _recv(self, line, i=0):
         """Invoked by the connection manager to process incoming data."""
-        _LOGGER.debug("_recv got line: %s", line)
+        _LOGGER.debug("_recv #%s got line: %s", i, line)
         if line == '':
             return
         typ = None
@@ -1528,13 +1545,14 @@ class Output(VantageEntity):
                         group._query_waiters.notify()
         return self
 
-    # TODO: It appears that after 64 ADDSTATUS calls, they start
+    # It appears that after 64 ADDSTATUS calls, they start
     # failing with ERROR:12 "Failed"
-    # Thus, we may need to ADDSTATUS and DELSTATUS and track which
-    # color lights have their status tracked....
-    # Or perhaps better, we could open a second connection to vantage
+    # If you get that, you need to change num_connections to be > 1
+    # so that we open a second (or more) connection to vantage
     # for the additional ADDSTATUS calls since the limit appears to be
     # a per-connection limit.
+    # Right now we just round-robin the connections for any non-GET
+    # command, and that's a heuristic that works fine for now
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
         output. For pure on/off loads the result is either 0.0 or 100.0."""

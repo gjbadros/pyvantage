@@ -30,6 +30,8 @@ def parse_args():
                         help="Just parse the file instead of connecting to host")
     parser.add_argument('--run-tests', action='store_true', dest='run_tests',
                         help="Run various tests to demonstrate some functonality")
+    parser.add_argument('--get-levels-test', action='store_true', dest='get_levels_test',
+                        help="Run various tests to demonstrate some functonality")
     parser.add_argument('--user', action='store', dest='user',
                         help='Username for logging in')
     parser.add_argument('--password', action='store', dest='password',
@@ -38,6 +40,8 @@ def parse_args():
                         help='Display all outputs after parsing')
     parser.add_argument('--dump-buttons', action='store_true', dest='dump_buttons',
                         help='Display all buttons after parsing')
+    parser.add_argument('--num-connections', action='store', dest='num_connections',
+                        help='Number of command processing connections to use')
 
     results = parser.parse_args()
     return results
@@ -106,12 +110,18 @@ def main():
         return
 
     v = Vantage(args.host, args.user, args.password, None, None,
-                3001, 2001, name_mappings)
+                3001, 2001, name_mappings, None, True,
+                int(args.num_connections) if args.num_connections else 1)
     v.load_xml_db(not args.use_cache)
     v.connect()
+    time.sleep(2)
 
     if args.run_tests:
         various_tests(v)
+
+    if args.get_levels_test:
+        for vid in [3442, 3455, 3456, 3457, 3458, 3459, 3462, 3463, 3468, 3469, 3470, 3471, 3472, 3473, 3474, 3477, 3479, 3481, 3482, 3483, 3484, 3485, 3486, 3487, 3488, 3489, 3500, 3502, 3503, 3504, 3505, 3506, 3507, 3508, 3509, 3510, 3552, 3553, 3554, 3555, 3556, 3557, 3558, 3559, 3729, 3730, 3736, 4388, 4395, 4506, 4507, 4508, 4523, 4524, 4525, 4526, 4527, 4528, 4529, 4536, 4625, 4626, 4627, 4634, 4722, 4727, 5320, 5844, 5846, 5848, 5850, 5852, 5855, 6180, 6181, 6184, 6185, 6186, 6187, 6188, 6189, 6190, 6191, 6192, 6193, 6194, 6195, 6196, 6199, 7029, 7030, 7033, 7034, 7035, 7036, 7037, 7166, 7167]:
+            _LOGGER.info("%s has level %s", vid, v._vid_to_load[vid].level)
 
     time.sleep(args.sleep_for)
 
