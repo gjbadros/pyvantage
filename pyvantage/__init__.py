@@ -93,6 +93,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 import logging
 import telnetlib
 import socket
+import select
 import threading
 import time
 import base64
@@ -264,11 +265,18 @@ class VantageConnection(threading.Thread):
     def run(self):
         """Main thread to maintain connection and receive remote status."""
         _LOGGER.debug("VantageConnection run started")
-        i = 0
         while True:
             self._maybe_reconnect()
             try:
-                line = self._telnet[i].read_until(b"\n")
+                sockets = [t.get_socket() for t in self._telnet]
+                readable, _, exceptional = select.select(sockets, [], [])
+                for i, t in enumerate(self._telnet):
+                    if t.get_socket() in exceptional:
+                        _LOGGER.error("Exceptional socket #%s: %s", i, t)
+                        raise EOFError()
+                    if t.get_socket() in readable:
+                        line = self._telnet[i].read_until(b"\n")
+                        self._recv_cb(line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:
@@ -279,8 +287,6 @@ class VantageConnection(threading.Thread):
                 with self._lock:
                     self._disconnect_locked()
                 continue
-            self._recv_cb(line.decode('ascii').rstrip(), i)
-            i = (i + 1) % self._num_connections
 
 
 def _desc_from_t1t2(title1, title2):
@@ -504,9 +510,9 @@ class VantageXmlDbParser():
         try:
             vid = int(sensor_xml.get('VID'))
             kind = {
-                "Power"      :"power",
-                "Current"    :"current",
-                "Temperature":"sensor"
+                "Power": "power",
+                "Current": "current",
+                "Temperature": "sensor"
             }[sensor_xml.find('Model').text]
             sensor = OmniSensor(self._vantage,
                                 name=sensor_xml.find('Name').text,
@@ -796,7 +802,6 @@ class Vantage():
     # Status report lines come back from Vantage with this prefix
     OP_STATUS = 'S:'
 
-
     def __init__(self, host, user, password,
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
@@ -810,7 +815,8 @@ class Vantage():
         self._name = None
         if self._host is not None:
             self._conn = VantageConnection(host, user, password, cmd_port,
-                                           self._recv, commdebug, num_connections)
+                                           self._recv, commdebug,
+                                           num_connections)
         else:
             self._conn = None
             if filename is None:
@@ -930,12 +936,13 @@ class Vantage():
         if obj.name in self._names:
             oldname = obj.name
             obj.name += " (%s)" % (str(obj.vid))
-            if '0-10V RELAYS' in oldname or cmd_type == 'BTN':
+            if ('0-10V RELAYS' in oldname or
+                'NOT USED' in oldname or cmd_type == 'BTN'):
+                _LOGGER.debug("Repeated name `%s' - adding vid to get %s",
+                              oldname, obj.name)
+            else:
                 _LOGGER.info("Repeated name `%s' - adding vid to get %s",
                              oldname, obj.name)
-            else:
-                _LOGGER.warning("Repeated name `%s' - adding vid to get %s",
-                                oldname, obj.name)
         self._names[obj.name] = obj.vid
 
      # Note: invoked on VantageConnection thread.
@@ -1819,7 +1826,6 @@ class LoadGroup(Output):
     def support_color_temp(self):
         """Returns true iff this load can be set to a color temperature."""
         return self._support_color_temp
-
 
     def __str__(self):
         """Returns a pretty-printed string for this object."""
