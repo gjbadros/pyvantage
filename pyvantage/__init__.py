@@ -197,10 +197,10 @@ class VantageConnection(threading.Thread):
             else:
                 _LOGGER.info("Vantage #%s send_ascii_nl: %s", i, cmd)
         try:
-            self._telnet[self._iconn].write(cmd.encode('ascii') + b'\r\n')
+            self._telnet[i].write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected")
-            raise
+            self._disconnect_locked()
 
     def send_ascii_nl(self, cmd):
         """Sends the specified command to the vantage controller.
