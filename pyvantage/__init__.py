@@ -200,7 +200,8 @@ class VantageConnection(threading.Thread):
             self._telnet[i].write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected")
-            self._disconnect_locked()
+            self._connected[i] = False
+            raise
 
     def send_ascii_nl(self, cmd):
         """Sends the specified command to the vantage controller.
@@ -230,6 +231,7 @@ class VantageConnection(threading.Thread):
             self._send_ascii_nl_locked("LOGIN " + self._user +
                                        " " + self._password, i)
             _LOGGER.debug("reading login response for #%s", i)
+            self._telnet[i].read_until(b'\r\n', 2)
         if i == 0:
             self._send_ascii_nl_locked("STATUS LOAD", i)
             self._telnet[i].read_until(b'\r\n', 2)
@@ -275,7 +277,7 @@ class VantageConnection(threading.Thread):
                         _LOGGER.error("Exceptional socket #%s: %s", i, t)
                         raise EOFError()
                     if t.get_socket() in readable:
-                        line = self._telnet[i].read_until(b"\n")
+                        line = self._telnet[i].read_until(b"\n", 2)
                         self._recv_cb(line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
@@ -948,7 +950,7 @@ class Vantage():
      # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
         """Invoked by the connection manager to process incoming data."""
-        _LOGGER.debug("_recv #%s got line: %s", i, line)
+        _LOGGER.debug("#%s _recv got line: %s", i, line)
         if line == '':
             return
         typ = None
@@ -965,17 +967,17 @@ class Vantage():
             cmds = self._s_cmds
             typ = 'S'
         else:
-            _LOGGER.error("_recv got unknown line start character")
+            _LOGGER.error("#%s _recv got unknown line start character", i)
             return
         parts = re.split(r'[ :]', line[2:])
         cmd_type = parts[0]
         vid = parts[1]
         args = parts[2:]
         if cmd_type not in cmds:
-            _LOGGER.warning("Unknown cmd %s (%s)", cmd_type, line)
+            _LOGGER.warning("#%s Unknown cmd %s (%s)", i, cmd_type, line)
             return
         if cmd_type == 'LOGIN':
-            _LOGGER.info("login successful")
+            _LOGGER.info("#%s login successful", i)
             return
         # TODO: is it okay to ignore R:RAMPLOAD responses?
         # or do we need to handle_update_and_notify like with "LOAD",
@@ -985,12 +987,12 @@ class Vantage():
                                            'GETCUSTOM', 'RAMPLOAD'):
             return
         if line[0] == 'R' and cmd_type == "ERROR":
-            _LOGGER.warning("Vantage %s on command: %s", line,
+            _LOGGER.warning("#%s Got %s on command: %s", i, line,
                             this_cmd)
             return
         # is there ever an S:ERROR line? that's all the below covers
         if cmd_type == 'ERROR':
-            _LOGGER.error("_recv got ERROR line: %s", line)
+            _LOGGER.error(" #%s _recv got ERROR line: %s", i, line)
             return
         if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT',
                         'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'):
@@ -1000,19 +1002,19 @@ class Vantage():
         elif cmd_type == 'TASK':
             return
         elif cmd_type == 'VARIABLE':
-            _LOGGER.debug("vantage variable set response: %s", line)
+            _LOGGER.debug("#%s variable set response: %s", i, line)
 
         ids = self._ids.get(cmd_type)
         if ids is None:
-            _LOGGER.warning("Might need to handle cmd_type ids: %s:: %s",
-                            cmd_type, line)
+            _LOGGER.warning("#%s Might need to handle cmd_type ids: %s:: %s",
+                            i, cmd_type, line)
         else:
             if not vid.isdigit():
-                _LOGGER.warning("VID %s is not an integer", vid)
+                _LOGGER.warning("#%s VID %s is not an integer", i, vid)
                 return
             vid = int(vid)
             if vid not in ids:
-                _LOGGER.warning("Unknown id %d (%s)", vid, line)
+                _LOGGER.warning("#%s Unknown id %d (%s)", i, vid, line)
                 return
             obj = ids[vid]
             # First let the device update itself
@@ -1677,9 +1679,8 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.warning("%s: Ignoring call to setter for color_temp "
-                            "of dmx_color light",
-                            self)
+            _LOGGER.info("%s: Ignoring call to setter for color_temp "
+                         "of dmx_color light", self)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp),
