@@ -1330,6 +1330,8 @@ class VantageEntity:
         """The handle_update callback is invoked when an event is received
         for the this entity.
 
+        This callback is invoked from the VantageConnection thread.
+
         Returns:
             self - If event was valid and was handled.
             None - otherwise.
@@ -1506,6 +1508,8 @@ class Output(VantageEntity):
     def handle_update(self, args):
         """Handles an event update for this object.
         E.g. dimmer level change
+
+        This callback is invoked from the VantageConnection thread.
 
         """
         _LOGGER.debug("vantage - handle_update %d -- %s", self._vid, args)
@@ -1780,9 +1784,9 @@ class Button(VantageSensor):
         return self._num
 
     def handle_update(self, args):
-        """The callback invoked by the main event loop.
+        """Handle an event from this keypad.
 
-        This handles an event from this keypad.
+        This callback is invoked from the VantageConnection thread.
 
         """
         action = args[0]
@@ -1908,7 +1912,11 @@ class Keypad(VantageSensor):
 
     def handle_update(self, args):
         """The callback invoked by a button's handle_update to
-        set keypad value to the name of button."""
+        set keypad value to the name of button.
+
+        This callback is invoked from the VantageConnection thread.
+
+        """
         _LOGGER.debug("Keypad %d(%s): %s",
                       self._vid, self._name, args)
         self._value = args[0]
@@ -1936,7 +1944,7 @@ class Task(VantageEntity):
     def handle_update(self, args):
         """Handle events from the task object.
 
-        This callback is invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         component = int(args[0])
@@ -1973,7 +1981,7 @@ class PollingSensor(VantageSensor):
     def handle_update(self, args):
         """Handle sensor updates.
 
-        This callback invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         # TODO: this is not the right thing for non-numeric variables
@@ -2116,7 +2124,7 @@ class Shade(VantageEntity):
     def handle_update(self, args):
         """Handle new value for shade.
 
-        This callback is invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         value = args[0]
