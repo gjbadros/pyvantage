@@ -50,6 +50,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 # Vantage Object    | pyvantage object | Output
 # ------------------+------------------+--------------
 # Area              | Area             | Used to give names to other objects
+# IRZone            | Area             | Used to give names to other objects
 # Load              | Output           | vc.outputs
 # DDGColorLoad      | Output           | vc.outputs
 # LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
@@ -367,6 +368,12 @@ class VantageXmlDbParser():
             _LOGGER.debug("Area = %s", area)
             self.vid_to_area[area.vid] = area
 
+        irzones = root.findall(".//Objects//IRZone[@VID]")
+        for irzone_xml in irzones:
+            area = self._parse_irzone(irzone_xml)
+            _LOGGER.debug("IRZone = %s", area)
+            self.vid_to_area[area.vid] = area
+
         loads = root.findall(".//Objects//Load[@VID]")
         loads = loads + root.findall(".//Objects//Vantage.DDGColorLoad[@VID]")
         for load_xml in loads:
@@ -495,6 +502,19 @@ class VantageXmlDbParser():
             return area
         except Exception as e:
             _LOGGER.warning("Error parsing Area vid = %d: %s", vid, e)
+
+    def _parse_irzone(self, irzone_xml):
+        """Parses an IRZone tag, which we treat like an area with no parent."""
+        try:
+            vid = int(irzone_xml.get('VID'))
+            irzone = Area(self._vantage,
+                          name=irzone_xml.find('Name').text,
+                          parent=0,
+                          vid=vid,
+                          note=irzone_xml.find('Note').text)
+            return irzone
+        except Exception as e:
+            _LOGGER.warning("Error parsing IRZone vid = %d: %s", vid, e)
 
     def _parse_variable(self, var_xml):
         """Parses a variable (GMem) tag."""
@@ -742,8 +762,13 @@ class VantageXmlDbParser():
             vid = int(button_xml.get('VID'))
             xml_name = button_xml.find('Name')
             name = ""
-            if xml_name:
+            if xml_name is not None:
                 name = xml_name.text.strip()
+                # By default Design Center names each button on a keypad "Button
+                # 1", "Button 2", etc.  This is not useful.  So if a user has
+                # those names, treat it as no name:
+                if name.startswith("Button "):
+                    name = ""
             if not name:
                 # You *can* give each button on each keypad a name in Design
                 # Center, but why would you bother?  If no name is present, just
@@ -765,14 +790,21 @@ class VantageXmlDbParser():
             num = int(parent.get('Position'))
             keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
             if keypad is None:
-                _LOGGER.debug("No parent vid = %d for button vid = %d "
-                              "(leaving button out)",
-                              parent_vid, vid)
-                return None
-            area = keypad.area
-            button = Button(self._vantage, name, area, vid, num, parent_vid,
-                            keypad, desc)
-            keypad.add_button(button)
+                irzone = self.vid_to_area.get(parent_vid)
+                if irzone is None:
+                    _LOGGER.debug("No parent vid = %d for button vid = %d "
+                                  "(leaving button out)",
+                                  parent_vid, vid)
+                    return None
+
+                button = Button(self._vantage, name, irzone.vid, vid, num,
+                                parent_vid, keypad, desc)
+
+            else:
+                area = keypad.area
+                button = Button(self._vantage, name, area, vid, num,
+                                parent_vid, keypad, desc)
+                keypad.add_button(button)
             return button
         except Exception as e:
             _LOGGER.warning("Error parsing button vid = %d: %s",
@@ -1329,6 +1361,8 @@ class VantageEntity:
         """The handle_update callback is invoked when an event is received
         for the this entity.
 
+        This callback is invoked from the VantageConnection thread.
+
         Returns:
             self - If event was valid and was handled.
             None - otherwise.
@@ -1505,6 +1539,8 @@ class Output(VantageEntity):
     def handle_update(self, args):
         """Handles an event update for this object.
         E.g. dimmer level change
+
+        This callback is invoked from the VantageConnection thread.
 
         """
         _LOGGER.debug("vantage - handle_update %d -- %s", self._vid, args)
@@ -1778,10 +1814,20 @@ class Button(VantageSensor):
         """Returns the button number."""
         return self._num
 
-    def handle_update(self, args):
-        """The callback invoked by the main event loop.
+    @property
+    def keypad_name(self):
+        """Returns the name of the keypad which contains this button."""
+        return self._keypad.name
 
-        This handles an event from this keypad.
+    @property
+    def keypad_vid(self):
+        """Returns the VID of the keypad which contains this button."""
+        return self._parent
+
+    def handle_update(self, args):
+        """Handle an event from this keypad.
+
+        This callback is invoked from the VantageConnection thread.
 
         """
         action = args[0]
@@ -1907,7 +1953,11 @@ class Keypad(VantageSensor):
 
     def handle_update(self, args):
         """The callback invoked by a button's handle_update to
-        set keypad value to the name of button."""
+        set keypad value to the name of button.
+
+        This callback is invoked from the VantageConnection thread.
+
+        """
         _LOGGER.debug("Keypad %d(%s): %s",
                       self._vid, self._name, args)
         self._value = args[0]
@@ -1935,7 +1985,7 @@ class Task(VantageEntity):
     def handle_update(self, args):
         """Handle events from the task object.
 
-        This callback is invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         component = int(args[0])
@@ -1972,7 +2022,7 @@ class PollingSensor(VantageSensor):
     def handle_update(self, args):
         """Handle sensor updates.
 
-        This callback invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         # TODO: this is not the right thing for non-numeric variables
@@ -2115,7 +2165,7 @@ class Shade(VantageEntity):
     def handle_update(self, args):
         """Handle new value for shade.
 
-        This callback is invoked by the main event loop.
+        This callback is invoked from the VantageConnection thread.
 
         """
         value = args[0]
