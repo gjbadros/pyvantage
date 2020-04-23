@@ -192,7 +192,7 @@ class VantageConnection(threading.Thread):
         if self._commdebug:
             if cmd.startswith("LOGIN"):
                 pass
-            elif cmd.startswith("GET"):
+            elif cmd.startswith("GET") or cmd.startswith("ADDSTATUS"):
                 _LOGGER.debug("Vantage #%s send_ascii_nl: %s", i, cmd)
             else:
                 _LOGGER.info("Vantage #%s send_ascii_nl: %s", i, cmd)
@@ -765,9 +765,9 @@ class VantageXmlDbParser():
             num = int(parent.get('Position'))
             keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
             if keypad is None:
-                _LOGGER.info("No parent vid = %d for button vid = %d "
-                             "(leaving button out)",
-                             parent_vid, vid)
+                _LOGGER.debug("No parent vid = %d for button vid = %d "
+                              "(leaving button out)",
+                              parent_vid, vid)
                 return None
             area = keypad.area
             button = Button(self._vantage, name, area, vid, num, parent_vid,
@@ -940,11 +940,10 @@ class Vantage():
             obj.name += " (%s)" % (str(obj.vid))
             if ('0-10V RELAYS' in oldname or
                 'NOT USED' in oldname or cmd_type == 'BTN'):
+                pass
+            else:
                 _LOGGER.debug("Repeated name `%s' - adding vid to get %s",
                               oldname, obj.name)
-            else:
-                _LOGGER.info("Repeated name `%s' - adding vid to get %s",
-                             oldname, obj.name)
         self._names[obj.name] = obj.vid
 
      # Note: invoked on VantageConnection thread.
