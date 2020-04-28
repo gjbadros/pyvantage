@@ -1714,8 +1714,8 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.info("%s: Ignoring call to setter for color_temp "
-                         "of dmx_color light", self)
+            _LOGGER.debug("%s: Ignoring call to setter for color_temp "
+                          "of dmx_color light", self)
         else:
             self._vantage.send("RAMPLOAD", self._color_control_vid,
                                kelvin_to_level(new_color_temp),
