@@ -2100,6 +2100,8 @@ class Variable(PollingSensor):
         self._value = val
         if self._kind == 'variable_text':
             val = '"' + val.replace('"', '""') + '"'
+        elif self._kind == 'variable_bool':
+            val = 1 if val else 0
         self._vantage.send("VARIABLE", self._vid, val)
 
 
