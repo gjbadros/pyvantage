@@ -41,8 +41,8 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 #     vc.subscribe(output, my_update_handler)
 #
 # Open a connection to the controller.  Spawns a second thread, which is
-# responsible for all communication with the Vantage and invokes update handlers
-# when state changes occur.
+# responsible for all communication with the Vantage and invokes update
+# handlers when state changes occur.
 #
 #   vc.connect();
 #
@@ -51,7 +51,7 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 # ------------------+------------------+--------------
 # Area              | Area             | Used to give names to other objects
 # IRZone            | Area             | Used to give names to other objects
-# Load              | Output           | vc.outputs
+# Load              | Output           | vc.outputs (light, switch, or fan)
 # DDGColorLoad      | Output           | vc.outputs
 # LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
 # Keypad            | Keypad           | vc.keypads
@@ -78,18 +78,22 @@ __copyright__ = "Copyright 2018, 2019 Greg J. Badros"
 #
 # Things that Vantage can do which are not yet supported:
 #
-# - Beep keypads. (There no direct support for this via TCP interface that I can
-#   see.  It appears the beep function is implemented from lower-level
-#   primitives in the XML config file.)
+# - Beep keypads. (There no direct support for this via TCP interface
+#   that I can see.  It appears the beep function is implemented from
+#   lower-level primitives in the XML config file.)
 #
 # - Change button colors.
 #
-# - Detect double/triple/quadruple presses on buttons, or long presses. (This is
-#   also implemented from lower-level primitives in the XML config.  Clients of
-#   this library just have to count press and release events themselves).
+# - Detect double/triple/quadruple presses on buttons, or long
+#   presses. (This is also implemented from lower-level primitives in
+#   the XML config.  Clients of this library just have to count press
+#   and release events themselves).
 #
 # - Control devices connected via serial/ethernet links, such as Elk alarms,
 #   stereo systems, etc.
+#
+#
+#  light.mh_m_great_room_big_ass_fan (load_type == Motor)
 
 import logging
 import telnetlib
@@ -520,9 +524,13 @@ class VantageXmlDbParser():
         """Parses a variable (GMem) tag."""
         try:
             vid = int(var_xml.get('VID'))
+            subtype_node = var_xml.find('Tag')
+            subtype = ''
+            if subtype_node is not None:
+                subtype = subtype_node.text.lower()
             var = Variable(self._vantage,
                            name=var_xml.find('Name').text,
-                           vid=vid)
+                           vid=vid, subtype=subtype)
             return var
         except Exception as e:
             _LOGGER.warning("Error parsing variable vid = %d: %s", vid, e)
@@ -603,8 +611,8 @@ class VantageXmlDbParser():
             output_type = 'LIGHT'
 
             # TODO: find a better heuristic so that on/off lights still show up
-            if (load_type == 'High Voltage Relay'
-                or load_type == 'Low Voltage Relay'):
+            if (load_type == 'High Voltage Relay' or
+                load_type == 'Low Voltage Relay'):
                 output_type = 'RELAY'
 
             if ' COLOR' in out_name and load_type != 'HID':
@@ -703,10 +711,12 @@ class VantageXmlDbParser():
             load_vids.append(v)
             if self.vid_to_load[v]._dmx_color:
                 dmx_color = True
-                _LOGGER.debug("for loadgroup %d, vid %s supports color", vid, v)
+                _LOGGER.debug("for loadgroup %d, vid %s supports color",
+                              vid, v)
             if self.vid_to_load[v].support_color_temp:
                 support_color_temp = True
-                _LOGGER.debug("for loadgroup %d, vid %s supports color_temp", vid, v)
+                _LOGGER.debug("for loadgroup %d, vid %s supports color_temp",
+                              vid, v)
 
         output = LoadGroup(self._vantage,
                            name=out_name,
@@ -764,15 +774,17 @@ class VantageXmlDbParser():
             name = ""
             if xml_name is not None:
                 name = xml_name.text.strip()
-                # By default Design Center names each button on a keypad "Button
-                # 1", "Button 2", etc.  This is not useful.  So if a user has
-                # those names, treat it as no name:
+                # By default Design Center names each button on a
+                # keypad "Button 1", "Button 2", etc.  This is not
+                # useful.  So if a user has those names, treat it as
+                # no name:
                 if name.startswith("Button "):
                     name = ""
             if not name:
-                # You *can* give each button on each keypad a name in Design
-                # Center, but why would you bother?  If no name is present, just
-                # use the descriptive text which appears on the actual button:
+                # You *can* give each button on each keypad a name in
+                # Design Center, but why would you bother?  If no name
+                # is present, just use the descriptive text which
+                # appears on the actual button:
                 xml_name = button_xml.find("Text1")
                 if xml_name is None:
                     return None
@@ -911,7 +923,7 @@ class Vantage():
             area = self._vid_to_area.get(parent_vid)
             if area:
                 answer.append(area.name)
-#    _LOGGER.debug("lineage for " + str(obj.vid) + " is " + str(answer))
+        # _LOGGER.debug("lineage for " + str(obj.vid) + " is " + str(answer))
         return answer
 
     # TODO: cleanup this awful logic
@@ -925,7 +937,7 @@ class Vantage():
         """
 
         # First, register the VID in our _ids map.  When we issue commands to
-        # the Vantage this map lets us route the respones to the correct object:
+        # the Vantage this map lets us route the respones to the correct object
         ids = self._ids.setdefault(cmd_type, {})
         ids = self._ids.setdefault(cmd_type2, {})
         if obj.vid in ids:
@@ -978,7 +990,7 @@ class Vantage():
                               oldname, obj.name)
         self._names[obj.name] = obj.vid
 
-     # Note: invoked on VantageConnection thread.
+    # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
         """Invoked by the connection manager to process incoming data."""
         _LOGGER.debug("#%s _recv got line: %s", i, line)
@@ -1910,7 +1922,8 @@ class LoadGroup(Output):
             # it appears to be ok to have ADDSTATUS called multiple times on
             # the same vid and it only counts 1 towards the 64 limit per
             # connection
-            self._vantage._colorvid_to_group_vid[self._color_vids[0]] = self._vid
+            self._vantage._colorvid_to_group_vid[
+                self._color_vids[0]] = self._vid
             self._vantage.send("ADDSTATUS", self._color_vids[0])
             self._addedstatus = True
         _LOGGER.debug("getload of %s", self._vid)
@@ -2025,9 +2038,18 @@ class PollingSensor(VantageSensor):
         This callback is invoked from the VantageConnection thread.
 
         """
-        # TODO: this is not the right thing for non-numeric variables
+
         try:
-            value = float(args[0])
+            if self._kind == 'variable_text':
+                # "he said ""she said"" then left" =>
+                #     he said "she said" then left
+                # i.e., remove leading and trailing quotes
+                # and undouble internal quotes
+                value = args[0][1:-1].replace('""', '"')
+            elif self._kind == 'variable_bool':
+                value = args[0] == '1'
+            else:
+                value = float(args[0])
         except Exception:
             value = args[0]
         _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
@@ -2042,15 +2064,28 @@ class Variable(PollingSensor):
     """
     CMD_TYPE = 'VARIABLE'  # GMem in the XML config
 
-    def __init__(self, vantage, name, vid):
+    def __init__(self, vantage, name, vid, subtype):
         """Initializes the variable object."""
-        super(Variable, self).__init__(vantage, name, None, vid, 'variable')
+        super(Variable, self).__init__(vantage, name, None, vid,
+                                       'variable' + "_" + subtype)
         self._vantage.register_id(Variable.CMD_TYPE, None, self)
 
     def __str__(self):
         """Returns pretty-printed representation of this object."""
         return 'Variable name: "%s", vid: %d, value: %s' % (
             self._name, self._vid, self._value)
+
+    @property
+    def value(self):
+        return super(Variable, self).value()
+
+    @value.setter
+    def value(self, val):
+        """Sets the variable to val. """
+        self._value = val
+        if self._kind == 'variable_text':
+            val = '"' + val.replace('"', '""') + '"'
+        self._vantage.send("VARIABLE", self._vid, val)
 
 
 class LightSensor(PollingSensor):
@@ -2062,14 +2097,16 @@ class LightSensor(PollingSensor):
         assert name is not None
         super(LightSensor, self).__init__(vantage, name,
                                           area, vid,
-                                          'light')
+                                          'lightsensor')
         self.value_range = value_range
         self._vantage.register_id(self.CMD_TYPE, None, self)
 
     def __str__(self):
         """Returns pretty-printed representation of this object."""
-        return 'LightSensor name (%s), area: "%s", kind: "%s", vid: %d, value: %s' % (
-            self._name, self._area, self._kind, self._vid, self._value)
+        return ('LightSensor name (%s), area: "%s", '
+                '"kind: "%s", vid: %d, value: %s' % (
+                    self._name, self._area, self._kind,
+                    self._vid, self._value))
 
 
 class OmniSensor(PollingSensor):

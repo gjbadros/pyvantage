@@ -8,6 +8,8 @@ It has evolved massively since then.
 
 Updated for shades on 2018-08-20
 Updated for multiple telnet connections on 2019-12-11
+Updated for better button support in 2020-03 
+Updated for better variable support on 2020-04-30
 
 (See git version history for details.)
 
