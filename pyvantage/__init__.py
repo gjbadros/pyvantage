@@ -16,10 +16,20 @@ $ pip3 install --upgrade .../path/to/pyvantage
 
 Then the component/vantage.py and its require line will work.
 
+For development, I do:
+
+$ docker-shell homeassistant
+> cd /usr/local/lib/python3.7/site-packages/pyvantage/
+> cp /config/pyvantage/pyvantage/_init__.py . 
+# or 
+> cp /config/pyvantage/pyvantage/__init__.py /usr/local/lib/python3.7/site-packages/pyvantage
+# where /config in the docker image points to my home assistant config directory
+# which has a pyvantage subdirectory containing a clone of the github repo.
+
 """
 
 __Author__ = "Greg J. Badros"
-__copyright__ = "Copyright 2018, 2019 Greg J. Badros"
+__copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 
 # USAGE:
 #
@@ -2030,7 +2040,12 @@ class PollingSensor(VantageSensor):
 
     def update(self):
         """Request an update from the device."""
-        self._vantage.send("GET"+self._kind.upper(), self._vid)
+        k = self._kind.upper()
+        if k == 'LIGHTSENSOR':
+            k = 'LIGHT'
+        elif k.startswith('VARIABLE'):
+            k = 'VARIABLE'
+        self._vantage.send("GET"+k, self._vid)
 
     def handle_update(self, args):
         """Handle sensor updates.
@@ -2077,7 +2092,7 @@ class Variable(PollingSensor):
 
     @property
     def value(self):
-        return super(Variable, self).value()
+        return super(Variable, self).value
 
     @value.setter
     def value(self, val):
