@@ -640,10 +640,10 @@ class VantageXmlDbParser():
                 load_vid = self._name_area_to_vid.get((load_name, area_vid))
                 if load_vid:
                     self._vid_to_colorvid[load_vid] = vid
-                    _LOGGER.info("Found colorvid = %d for load_vid %d"
-                                 " (names %s and %s) in area %s (%d)",
-                                 vid, load_vid, out_name, load_name,
-                                 area_name, area_vid)
+                    _LOGGER.debug("Found colorvid = %d for load_vid %d"
+                                  " (names %s and %s) in area %s (%d)",
+                                  vid, load_vid, out_name, load_name,
+                                  area_name, area_vid)
                     self.vid_to_load[load_vid].color_control_vid = vid
                 else:
 
