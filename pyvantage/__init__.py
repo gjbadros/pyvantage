@@ -1689,10 +1689,13 @@ class Output(VantageEntity):
         # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
         srgb = sRGBColor(*new_rgb)
         hs_color = convert_color(srgb, HSVColor)
-        self._hs = [hs_color.hsv_h, hs_color.hsv_s]
+        self._hs = [hs_color.hsv_h, hs_color.hsv_s * 100.0]
         self._rgb = new_rgb
         self._rgb_is_dirty = True
         self._invoke_rgb()
+        if self._rgb_is_dirty:
+            self._invoke_hs()
+            # self._rgb_is_dirty = False
 
     def _invoke_rgb(self):
         """Update the RGB of the light to self._rgb"""
@@ -1718,9 +1721,18 @@ class Output(VantageEntity):
         _LOGGER.debug("%s: hs = %s", self,
                       json.dumps(new_hs))
         self._hs = new_hs
-        hs_color = HSVColor(new_hs[0], new_hs[1], 1.0)
+        hs_color = HSVColor(new_hs[0], new_hs[1]/100.0, 1.0)
         rgb = convert_color(hs_color, sRGBColor)
-        self.rgb = [rgb.rgb_r, rgb.rgb_g, rgb.rgb_b]
+        self._rgb = [rgb.rgb_r, rgb.rgb_g, rgb.rgb_b]
+        self._invoke_hs()
+
+    def _invoke_hs(self):
+        """Update the HS of the light to self._hsv
+        It's worth noting that HS still specifies a color even when the light is off."""
+        (h, s) = self._hs
+        self._vantage.send("INVOKE", self._vid,
+                           ("RGBLoad.SetHSL %d %d %d" %
+                            (h, s, self._level)))
 
     @property
     def color_temp(self):

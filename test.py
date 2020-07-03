@@ -79,6 +79,31 @@ def various_tests(v):
     ll = v._vid_to_load[4727]
     ll.level = 100
     ll.rgb = [100,20,20]
+    print("desk light")
+    dwl = v._vid_to_load[3497]
+    dwl.level = 0
+    time.sleep(6)
+    dwl.hs = [355, 100]
+    dwl.level = 100
+    time.sleep(6)
+    dwl.level = 0
+    dwl.hs = [180, 100]
+    print("changed color while off")
+    time.sleep(2)
+    dwl.level = 100
+    time.sleep(6)
+    print("desk light rgb")
+    dwl = v._vid_to_load[3497]
+    dwl.level = 0
+    time.sleep(6)
+    dwl.rgb = [255,0,0]
+    dwl.level = 100
+    time.sleep(6)
+    dwl.level = 0
+    dwl.rgb = [0,0,255]
+    print("changed color while off")
+    time.sleep(2)
+    dwl.level = 100
 
 
 def main():
