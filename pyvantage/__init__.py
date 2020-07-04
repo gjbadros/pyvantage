@@ -1941,7 +1941,7 @@ class LoadGroup(Output):
         for vid in self._load_vids:
             load = self._vantage._vid_to_load.get(vid)
             if load and (load._dmx_color or load._load_type == "DW"):
-                self._vantage.send("INVOKE", self._vid,
+                self._vantage.send("INVOKE", vid,
                                    ("RGBLoad.SetHSL %d %d %d" %
                                     (h, s, self._level)))
 
