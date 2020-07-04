@@ -1935,6 +1935,16 @@ class LoadGroup(Output):
         if self._level > 0:
             self._rgb_is_dirty = False
 
+    def _invoke_hs(self):
+        """Update the RGB of the load group to self._rgb"""
+        (h, s) = self._hs
+        for vid in self._load_vids:
+            load = self._vantage._vid_to_load.get(vid)
+            if load and (load._dmx_color or load._load_type == "DW"):
+                self._vantage.send("INVOKE", self._vid,
+                                   ("RGBLoad.SetHSL %d %d %d" %
+                                    (h, s, self._level)))
+
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
         output. For pure on/off loads the result is either 0.0 or 100.0."""

@@ -79,6 +79,10 @@ def various_tests(v):
     ll = v._vid_to_load[4727]
     ll.level = 100
     ll.rgb = [100,20,20]
+    ulg = v._vid_to_load[4727] # mbr uplight group
+    ulg.level = 100
+    ulg.hs = [0,100]
+
     print("desk light")
     dwl = v._vid_to_load[3497]
     dwl.level = 0
