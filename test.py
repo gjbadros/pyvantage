@@ -77,6 +77,7 @@ def various_tests(v):
     print("ls = " + str(ls.value))
     print("los = " + str(los.value))
     ll = v._vid_to_load[4727]
+    print("ll = " + str(ll))
     ll.level = 100
     ll.rgb = [100,20,20]
     ulg = v._vid_to_load[4727] # mbr uplight group

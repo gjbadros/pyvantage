@@ -714,6 +714,7 @@ class VantageXmlDbParser():
         vid = int(vid)
 
         load_vids = []
+        color_vids = []
         dmx_color = False
         support_color_temp = False
         for load in loads:
@@ -721,10 +722,13 @@ class VantageXmlDbParser():
             load_vids.append(v)
             if self.vid_to_load[v]._dmx_color:
                 dmx_color = True
+                support_color_temp = True
+                color_vids.append(v)
                 _LOGGER.debug("for loadgroup %d, vid %s supports color",
                               vid, v)
-            if self.vid_to_load[v].support_color_temp:
+            elif self.vid_to_load[v].support_color_temp:
                 support_color_temp = True
+                color_vids.append(v)
                 _LOGGER.debug("for loadgroup %d, vid %s supports color_temp",
                               vid, v)
 
@@ -732,6 +736,7 @@ class VantageXmlDbParser():
                            name=out_name,
                            area=area_vid,
                            load_vids=load_vids,
+                           color_vids=color_vids,
                            dmx_color=dmx_color,
                            support_color_temp=support_color_temp,
                            vid=vid)
@@ -1889,19 +1894,25 @@ class Button(VantageSensor):
 
 class LoadGroup(Output):
     """Represent a Vantage LoadGroup."""
-    def __init__(self, vantage, name, area, load_vids, dmx_color,
-                 support_color_temp, vid):
+    def __init__(self, vantage, name, area, load_vids, color_vids,
+                 dmx_color, support_color_temp, vid):
         """Initialize a load group"""
         super(LoadGroup, self).__init__(
             vantage, name, area, 'GROUP', 'GROUP', None, dmx_color, vid)
         self._load_vids = load_vids
+        self._color_vids = color_vids
         self._support_color_temp = support_color_temp
+        self._brightness_vid = None
+        if len(self._load_vids) == 2 and len(self._color_vids) == 1:
+            if self._load_vids[0] == self._color_vids[0]:
+                self._brightness_vid = self._load_vids[1]
+            else:
+                self._brightness_vid = self._load_vids[0]
 
-        if not self._is_dimmable:
-            for v in load_vids:
-                if self._vantage._vid_to_load[v]._is_dimmable:
-                    self._is_dimmable = True
-                    break
+        for v in load_vids:
+            if self._vantage._vid_to_load[v]._is_dimmable:
+                self._is_dimmable = True
+                break
 
     def support_color_temp(self):
         """Returns true iff this load can be set to a color temperature."""
@@ -1910,7 +1921,7 @@ class LoadGroup(Output):
     def __str__(self):
         """Returns a pretty-printed string for this object."""
         return ("Output name: '%s' area: %d type: '%s' load: '%s' "
-                "id: %d %s%s%s%s (%s) [%s]" % (
+                "id: %d %s%s%s%s (%s) (c:%s) [%s]" % (
                     self._name, self._area, self._output_type,
                     self._load_type, self._vid,
                     ("(dim) " if self.is_dimmable else ""),
@@ -1918,7 +1929,20 @@ class LoadGroup(Output):
                     ("(color) " if self.support_color else ""),
                     ("(dirty) " if self._rgb_is_dirty else ""),
                     self._load_vids,
+                    self._color_vids,
                     self.full_lineage))
+
+    @property
+    def level(self):
+        """Returns the output level of the group.
+        Iff there is one non-color and one color load, then delegate to the non-color load."""
+        if self._brightness_vid:
+            self._vantage._vid_to_load.get(self._brightness_vid).level
+
+    @level.setter
+    def level(self, new_level):
+        if self._brightness_vid:
+            self._vantage._vid_to_load.get(self._brightness_vid).level = new_level
 
     # Load Groups do not respond to RGBLoad.SetRGBW invocations
     # so we need to call them for each of the member groups that do
