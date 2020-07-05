@@ -898,6 +898,7 @@ class Vantage():
         self._vid_to_sensor = {}  # copied out from the parser
         self._name_to_task = {}  # copied out from the parser
         self._colorvid_to_group_vid = {}
+        self._brightnessvid_to_group_vid = {}
         self._r_cmds = ['LOGIN', 'LOAD', 'STATUS', 'GETLOAD', 'GETVARIABLE',
                         'ERROR',
                         'TASK', 'GETBLIND', 'BLIND', 'INVOKE', 'VARIABLE',
@@ -1596,6 +1597,13 @@ class Output(VantageEntity):
             if level > 0 and self._rgb_is_dirty:
                 self._invoke_rgb()
             self._query_waiters.notify()
+            bvid = self._vantage._brightnessvid_to_group_vid.get(self._vid)
+            if bvid:
+                group = self._vantage._vid_to_load[bvid]
+                _LOGGER.debug("also updating bvid %d(%s): l=%f",
+                              bvid, group._name, level)
+                group.level = level
+                group._query_waiters.notify()
         else:
             if args[0] == 'RGBLoad.GetRGB':
                 _LOGGER.info("RGBLoad.GetRGB, handling vid = %d; "
@@ -1649,15 +1657,13 @@ class Output(VantageEntity):
         """Returns true iff this load is full-color."""
         return self._dmx_color
 
-    @property
-    def level(self):
+    def _get_level(self):
         """Returns the current output level by querying the controller."""
         ev = self._query_waiters.request(self.__do_query_level)
         ev.wait(self._wait_seconds)
         return self._level
 
-    @level.setter
-    def level(self, new_level):
+    def _set_level(self, new_level):
         """Sets the new output level."""
         if self._level == new_level:
             return
@@ -1675,6 +1681,8 @@ class Output(VantageEntity):
             self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
         else:
             self._vantage.send("LOAD", self._vid, new_level)
+
+    level = property(_get_level, _set_level)
 
     @property
     def rgb(self):
@@ -1908,6 +1916,9 @@ class LoadGroup(Output):
                 self._brightness_vid = self._load_vids[1]
             else:
                 self._brightness_vid = self._load_vids[0]
+        if self._brightness_vid:
+            self._vantage._brightnessvid_to_group_vid[
+                self._brightness_vid] = self._vid
 
         for v in load_vids:
             if self._vantage._vid_to_load[v]._is_dimmable:
@@ -1921,7 +1932,7 @@ class LoadGroup(Output):
     def __str__(self):
         """Returns a pretty-printed string for this object."""
         return ("Output name: '%s' area: %d type: '%s' load: '%s' "
-                "id: %d %s%s%s%s (%s) (c:%s) [%s]" % (
+                "id: %d %s%s%s%s (%s) (c:%s) (b:%s) [%s]" % (
                     self._name, self._area, self._output_type,
                     self._load_type, self._vid,
                     ("(dim) " if self.is_dimmable else ""),
@@ -1930,19 +1941,29 @@ class LoadGroup(Output):
                     ("(dirty) " if self._rgb_is_dirty else ""),
                     self._load_vids,
                     self._color_vids,
+                    self._brightness_vid,
                     self.full_lineage))
 
-    @property
-    def level(self):
+    def last_level(self):
+        if self._brightness_vid:
+            return self._vantage._vid_to_load.get(self._brightness_vid)._level
+        else:
+            return self._level
+    
+    def _get_level(self):
         """Returns the output level of the group.
         Iff there is one non-color and one color load, then delegate to the non-color load."""
         if self._brightness_vid:
-            self._vantage._vid_to_load.get(self._brightness_vid).level
+            return self._vantage._vid_to_load.get(self._brightness_vid).level
+        else:
+            return super(LoadGroup, self)._get_level()
 
-    @level.setter
-    def level(self, new_level):
+    def _set_level(self, new_level):
         if self._brightness_vid:
             self._vantage._vid_to_load.get(self._brightness_vid).level = new_level
+        super(LoadGroup, self)._set_level(new_level)
+
+    level = property(_get_level, _set_level)
 
     # Load Groups do not respond to RGBLoad.SetRGBW invocations
     # so we need to call them for each of the member groups that do
