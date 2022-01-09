@@ -66,6 +66,7 @@ __copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 # LoadGroup         | LoadGroup        | vc.outputs, vc.load_groups
 # Keypad            | Keypad           | vc.keypads
 # DualRelayStation  | Keypad           | vc.keypads
+# IRZone            | Keypad           | vc.keypads
 # Button            | Button           | vc.buttons
 # DryContact        | Button           | vc.buttons
 # GMem              | Variable         | vc.variables
@@ -115,6 +116,7 @@ import base64
 import re
 import json
 import os
+import traceback
 
 from collections import deque
 from xml.sax.saxutils import escape
@@ -214,9 +216,8 @@ class VantageConnection(threading.Thread):
         try:
             self._telnet[i].write(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
-            _LOGGER.warning("Vantage BrokenPipeError - disconnected")
+            _LOGGER.warning("Vantage BrokenPipeError - disconnected but retrying")
             self._connected[i] = False
-            raise
 
     def send_ascii_nl(self, cmd):
         """Sends the specified command to the vantage controller.
@@ -314,6 +315,21 @@ def _desc_from_t1t2(title1, title2):
     return desc.strip()
 
 
+def replace_keep_case(word, replacement, text):
+    """Replace word with replacement in text.
+    While preserving the case (lower/upper/title) of word."""
+    def func(match):
+        g = match.group()
+        if g.islower():
+            return replacement.lower()
+        if g.istitle():
+            return replacement.title()
+        if g.isupper():
+            return replacement.upper()
+        return replacement
+    return re.sub(word, func, text, flags=re.I)
+
+
 class VantageXmlDbParser():
     """The parser for Vantage XML database.
 
@@ -390,7 +406,59 @@ class VantageXmlDbParser():
 
         loads = root.findall(".//Objects//Load[@VID]")
         loads = loads + root.findall(".//Objects//Vantage.DDGColorLoad[@VID]")
-        for load_xml in loads:
+        other_loads = []
+        color_loads = []
+        open_loads = []
+        for ld in loads:
+            t = ld.find('Name').text
+            if t.endswith(' COLOR'):
+                color_loads.append(ld)
+            elif t.lower().endswith(' open'):
+                open_loads.append(ld)
+            else:
+                other_loads.append(ld)
+        ordered_loads = open_loads + other_loads + color_loads
+        skip_load_vids = set()
+        for load_xml in ordered_loads:
+            xml_name = load_xml.find('Name').text
+            output = None
+            if xml_name.lower().endswith(" open"):
+                close_name = replace_keep_case(' open', " close", xml_name)
+                stop_name = replace_keep_case(' open', " stop", xml_name)
+                isopen_name = replace_keep_case(' open', " is open", xml_name)
+                _LOGGER.debug("Looking for close_name = %s", close_name)
+                _LOGGER.debug("Looking for stop_name = %s", stop_name)
+                _LOGGER.debug("Looking for isopen_name = %s", isopen_name)
+                close_load_xml = root.findall(
+                    ".//Objects//Load[Name='" + close_name + "']")
+                if len(close_load_xml) == 1:
+                    close_load_xml = close_load_xml[0]
+                    isopen_contact_xml = root.findall(
+                        ".//Objects//DryContact[Name='" + isopen_name + "']")
+                    if len(isopen_contact_xml) == 1:
+                        isopen_contact_xml = isopen_contact_xml[0]
+                    else:
+                        isopen_contact_xml = None
+                    stop_load_xml = root.findall(
+                        ".//Objects//Load[Name='" + stop_name + "']")
+                    if len(stop_load_xml) == 1:
+                        stop_load_xml = stop_load_xml[0]
+                    else:
+                        stop_load_xml = None
+                    shade = self._parse_3_shade(isopen_contact_xml,
+                                                load_xml,
+                                                close_load_xml,
+                                                stop_load_xml)
+                    for v in shade.vids:
+                        skip_load_vids.add(v)
+                    self.vid_to_shade[shade.vid] = shade
+                    self.outputs.append(shade)
+                    _LOGGER.debug("shade3 = %s", shade)
+                    continue
+
+            if int(load_xml.get("VID")) in skip_load_vids:
+                _LOGGER.debug("Skipping %s because used for blind3", load_xml)
+                continue
             output = self._parse_output(load_xml)
             if output is None:
                 continue
@@ -412,11 +480,13 @@ class VantageXmlDbParser():
 
         keypads = root.findall(".//Objects//Keypad[@VID]")
         keypads = keypads + root.findall(".//Objects//DualRelayStation[@VID]")
+        keypads = keypads + root.findall(".//Objects//IRZone[@VID]")
         for kp_xml in keypads:
             keypad = self._parse_keypad(kp_xml)
             _LOGGER.debug("keypad = %s", keypad)
             self.vid_to_keypad[keypad.vid] = keypad
-            self.vid_to_area[keypad.area].add_keypad(keypad)
+            if keypad.area > 0:
+                self.vid_to_area[keypad.area].add_keypad(keypad)
             self.keypads.append(keypad)
 
         buttons = root.findall(".//Objects//Button[@VID]")
@@ -697,6 +767,32 @@ class VantageXmlDbParser():
         except Exception as e:
             _LOGGER.warning("Error parsing Output vid = %d: %s", vid, e)
 
+    def _parse_3_shade(self, isopen_xml, open_xml, close_xml, stop_xml):
+        """Parses three XML elements that together make a single shade.
+        open_xml is the output load low-voltage relay for opening,
+        close_xml is the output load low-voltage relaying for closing.
+        isopen_xml is the drycontact for reading whether it is open."""
+        _LOGGER.debug("_parse_3_shade io,o,c,s=%s, %s, %s, %s",
+                      isopen_xml, open_xml, close_xml, stop_xml)
+        vids = [int(isopen_xml.get('VID')) if isopen_xml else None,
+                int(open_xml.get('VID')),
+                int(close_xml.get('VID')),
+                int(stop_xml.get('VID')) if stop_xml else None]
+
+        shade_name = open_xml.find('Name').text.strip()[:-5]
+        area_vid = int(open_xml.find('Area').text)
+        if ((area_vid != int(close_xml.find('Area').text) or
+             (isopen_xml and area_vid != int(isopen_xml.find('Area').text)) or
+             (stop_xml and area_vid != int(stop_xml.find('Area').text)))):
+            _LOGGER.warning("open/close/stop/isopen device "
+                            "areas do not match: %s", shade_name)
+            return None
+        shade = Shade3(self._vantage,
+                       name=shade_name,
+                       area_vid=area_vid,
+                       vids=vids)
+        return shade
+
     def _parse_load_group(self, output_xml):
         """Parses a load group, which is a set of loads"""
         out_name = output_xml.find('DName').text
@@ -744,7 +840,8 @@ class VantageXmlDbParser():
 
     def _parse_keypad(self, keypad_xml):
         """Parses a keypad device."""
-        area_vid = int(keypad_xml.find('Area').text)
+        area_xml = keypad_xml.find('Area')
+        area_vid = int(area_xml.text) if area_xml else -1
         keypad = Keypad(self._vantage,
                         name=keypad_xml.find('Name').text + ' [K]',
                         area=area_vid,
@@ -766,10 +863,15 @@ class VantageXmlDbParser():
         # one.
         try:
             vid = int(dc_xml.get('VID'))
+            if self.vid_to_shade.get(vid):
+                _LOGGER.debug("Skipping vid=%d as drycontact "
+                              "because already part of a BLIND3", vid)
+                return None
             name = dc_xml.find('Name').text + ' [C]'
             parent = dc_xml.find('Parent')
             parent_vid = int(parent.text)
-            area_vid = int(dc_xml.find('Area').text)
+            area_xml = dc_xml.find('Area')
+            area_vid = int(area_xml.text) if area_xml else -1
             num = 0
             keypad = None
             _LOGGER.debug("Found DryContact with vid = %d", vid)
@@ -780,6 +882,7 @@ class VantageXmlDbParser():
         except Exception as e:
             _LOGGER.warning("Error parsing drycontact vid = %d: %s",
                             vid, e)
+            traceback.print_exc()
 
     def _parse_button(self, button_xml):
         """Parses a button device that part of a keypad."""
@@ -943,7 +1046,7 @@ class Vantage():
         return answer
 
     # TODO: cleanup this awful logic
-    def register_id(self, cmd_type, cmd_type2, obj):
+    def register_id(self, cmd_type, cmd_type2, obj, vid=None):
         """Registers an object (through its vid [vantage id]).
 
         This lets it receive update notifications. This is the core
@@ -952,15 +1055,17 @@ class Vantage():
 
         """
 
+        if vid == None:
+            vid = obj.vid
         # First, register the VID in our _ids map.  When we issue commands to
         # the Vantage this map lets us route the respones to the correct object
         ids = self._ids.setdefault(cmd_type, {})
         ids = self._ids.setdefault(cmd_type2, {})
-        if obj.vid in ids:
-            raise VIDExistsError("VID exists %s" % obj.vid)
-        self._ids[cmd_type][obj.vid] = obj
+        if vid in ids:
+            raise VIDExistsError("VID exists %s" % vid)
+        self._ids[cmd_type][vid] = obj
         if cmd_type2:
-            self._ids[cmd_type2][obj.vid] = obj
+            self._ids[cmd_type2][vid] = obj
 
         # Now give the object a unique name.  We prefix in reverse order the
         # areas the object is contained in.  So an object may be called "Main
@@ -1081,12 +1186,16 @@ class Vantage():
                     (typ == 'R' and
                      cmd_type in ('LOAD', 'POWER', 'CURRENT',
                                   'VARIABLE', 'SENSOR', 'LIGHT'))):
-                self.handle_update_and_notify(obj, args)
+                self.handle_update_and_notify(obj, args, vid)
 
     # Note: invoked on VantageConnection thread.
-    def handle_update_and_notify(self, obj, args):
-        """Call handle_update for the obj and for subscribers."""
-        handled = obj.handle_update(args)
+    def handle_update_and_notify(self, obj, args, vid):
+        """Call handle_update for the obj and for subscribers.
+        We have to pass the vid along, too, since there are
+        object types, e.g., Shade3, that have multiple vids
+        represented by a single object and status on any of
+        those vids goes back to the same handle_update()."""
+        handled = obj.handle_update(args, vid)
         # Now notify anyone who cares that device may have changed
         if handled and handled in self._subscribers:
             self._subscribers[handled](handled)
@@ -1385,7 +1494,7 @@ class VantageEntity:
         areas.append(self._name)
         return areas
 
-    def handle_update(self, _):
+    def handle_update(self, _, __):
         """The handle_update callback is invoked when an event is received
         for the this entity.
 
@@ -1399,8 +1508,8 @@ class VantageEntity:
 
     @property
     def kind(self):
-        """The type of object (for units in hass)."""
-        return None
+        """Returns the output type."""
+        return self._load_type
 
     @property
     def extra_info(self):
@@ -1564,7 +1673,7 @@ class Output(VantageEntity):
     # S:STATUS [vid] RGBLoad.GetColor [value]
     # S:STATUS [vid] RGBLoad.GetColorName [value]
     # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
-    def handle_update(self, args):
+    def handle_update(self, args, _):
         """Handles an event update for this object.
         E.g. dimmer level change
 
@@ -1587,7 +1696,7 @@ class Output(VantageEntity):
                     return light
                 _LOGGER.warning("Received color change of VID %d but cannot "
                                 "find corresponding load", self._vid)
-                return self
+                return None
             _LOGGER.debug("Updating brightness %d(%s): l=%f",
                           self._vid, self._name, level)
             self._level = level
@@ -1823,6 +1932,155 @@ class VantageSensor(VantageEntity):
         self._value = val
 
 
+class Shade3(VantageEntity):
+    """A shade that is made up of 3 vantage devices.
+    1) an open dry contact to initiate opening;
+    2) a close dry contact to initiate closing;
+    3) a sensor dry contact to tell if it's open.
+    An optional 4th dry-contact to stop open/close is allowed."""
+
+    CMD_TYPE = 'BTN'  # for a button -- the isopen sensor
+
+    def __init__(self, vantage, name, area_vid, vids):
+        super(Shade3, self).__init__(vantage, name, area_vid, vids[1])
+        self._is_open = None
+        self._level = None
+        self._load_type = 'BLIND3'
+        self._extra_info['vids'] = "%s" % vids
+        self._isopen_vid = vids[0]
+        self._open_vid = vids[1]
+        self._close_vid = vids[2]
+        self._stop_vid = vids[3]
+        self.vids = vids
+        if self._isopen_vid:
+            self._vantage.register_id(Shade3.CMD_TYPE, None,
+                                      self, self._isopen_vid)
+        self._vantage.register_id('LOAD', None,
+                                  self, self._open_vid)
+        self._vantage.register_id('LOAD', None,
+                                  self, self._close_vid)
+        if self._stop_vid:
+            self._vantage.register_id('LOAD', None,
+                                      self, self._stop_vid)
+        self._query_waiters = _RequestHelper()
+
+    def __str__(self):
+        """Returns a pretty-printed string for this object."""
+        return (
+            "Output3 name: '%s' area: %d type: '%s' is_open: '%s' "
+            "vids: %s" % (
+                self._name, self._area, self._load_type,
+                self._is_open, self.vids))
+
+    def __repr__(self):
+        """Returns a stringified representation of this object."""
+        return str({'name': self._name, 'vids': self.vids, 'area': self._area,
+                    'type': self._load_type, 'is_open': self._is_open})
+
+    @property
+    def simple_name(self):
+        """Return a simple pretty-printed string for this object."""
+        return 'VIDS:%s (%s) [%s]' % (self.vids, self._name, self._load_type)
+
+    def last_level(self):
+        """Returns last cached value of output level, no query is performed."""
+        return None
+
+    @property
+    def level(self):
+        """The level (i.e. position) of the shade.
+        Shade3 cannot report level, so we just return None"""
+        return self._level
+
+    @level.setter
+    def level(self, new_level):
+        if new_level == 0:
+            self.close()
+            self._level = 0
+        elif new_level == 100:
+            self.open()
+            self._level = 100
+        
+    def __do_query_level(self):
+        pass
+
+    def open(self):
+        """Open the shade."""
+        ev = self._query_waiters.request(self._do_start_open)
+        ev.wait(0.5)
+        self._vantage.send("LOAD", self._open_vid, "0")
+        if not self._isopen_vid:
+            self._is_open = True
+
+    def _do_start_open(self):
+        """Issue the start open command."""
+        self._vantage.send("LOAD", self._open_vid, "100")
+
+    def stop(self):
+        """Stop the shade."""
+        if self._stop_vid:
+            ev = self._query_waiters.request(self._do_start_stop)
+            ev.wait(0.5)
+            self._vantage.send("LOAD", self._stop_vid, "0")
+        else:
+            _LOGGER.warning("stop called on blind3 with no stop stupport: %s",
+                            self)
+
+    def _do_start_stop(self):
+        """Issue the start open command."""
+        self._vantage.send("LOAD", self._stop_vid, "100")
+
+    def close(self):
+        """Stop the shade."""
+        ev = self._query_waiters.request(self._do_start_close)
+        ev.wait(0.5)
+        self._vantage.send("LOAD", self._close_vid, "0")
+        if not self._isopen_vid:
+            self._is_open = False
+
+    def _do_start_close(self):
+        """Issue the start open command."""
+        self._vantage.send("LOAD", self._close_vid, "100")
+
+    def handle_update(self, args, vid):
+        """Handle new value for shade3.
+
+        This callback is invoked by the main event loop.
+
+        """
+        if vid == self._open_vid:
+            _LOGGER.info("Got %s open_vid args = %s", self, args)
+            self._query_waiters.notify()
+            return self
+        if vid == self._close_vid:
+            _LOGGER.info("Got %s open_vid args = %s", self, args)
+            self._query_waiters.notify()
+            return self
+        if vid == self._stop_vid:
+            _LOGGER.info("Got %s open_vid args = %s", self, args)
+            self._query_waiters.notify()
+            return self
+        if vid != self._isopen_vid:
+            _LOGGER.warning("unrecognized vid %d in handle_update: %s",
+                            vid, self)
+            return None
+        if self._isopen_vid is None:
+            _LOGGER.warning("Surprised: got handle_update for Blind3 "
+                            "without isopen_vid: %s", self)
+            return None
+        value = args[0]
+
+        if value == "PRESS":
+            self._is_open = True
+        elif value == "RELEASE":
+            self._is_open = False
+        else:
+            _LOGGER.warning("Got unknown shade3 %s (%d) message: %s",
+                            self._name, self._vid, value)
+        self._query_waiters.notify()
+        return self
+
+
 class Button(VantageSensor):
     """This object represents a keypad button that we can trigger and handle
     events for (button presses)."""
@@ -1871,8 +2129,8 @@ class Button(VantageSensor):
         """Returns the VID of the keypad which contains this button."""
         return self._parent
 
-    def handle_update(self, args):
-        """Handle an event from this keypad.
+    def handle_update(self, args, _):
+        """The callback invoked by the main event loop.
 
         This callback is invoked from the VantageConnection thread.
 
@@ -1884,7 +2142,8 @@ class Button(VantageSensor):
             self._value = action
             # this transfers control to Keypad.handle_update(...)
             self._vantage.handle_update_and_notify(
-                self._keypad, [self._num, self._name, self._value])
+                self._keypad, [self._num, self._name, self._value],
+                self._vid)
         else:  # it's a drycontact
             # TODO: support per-vid flipping/control of these rewrites
             if action == 'PRESS':
@@ -2041,7 +2300,7 @@ class Keypad(VantageSensor):
         """The type of object (for units in hass)."""
         return 'keypad'
 
-    def handle_update(self, args):
+    def handle_update(self, args, _):
         """The callback invoked by a button's handle_update to
         set keypad value to the name of button.
 
@@ -2072,7 +2331,7 @@ class Task(VantageEntity):
         return 'Task name: "%s", vid: %d' % (
             self._name, self._vid)
 
-    def handle_update(self, args):
+    def handle_update(self, args, _):
         """Handle events from the task object.
 
         This callback is invoked from the VantageConnection thread.
@@ -2114,7 +2373,7 @@ class PollingSensor(VantageSensor):
             k = 'VARIABLE'
         self._vantage.send("GET"+k, self._vid)
 
-    def handle_update(self, args):
+    def handle_update(self, args, _):
         """Handle sensor updates.
 
         This callback is invoked from the VantageConnection thread.
@@ -2225,11 +2484,6 @@ class Shade(VantageEntity):
         self._vantage.register_id(Shade.CMD_TYPE, None, self)
         self._query_waiters = _RequestHelper()
 
-    @property
-    def kind(self):
-        """Returns the output type. At present AUTO_DETECT or NON_DIM."""
-        return self._load_type
-
     def __str__(self):
         """Returns pretty-printed representation of this object."""
         return 'Shade name: "%s", vid: %d, area: %d, level: %s' % (
@@ -2283,7 +2537,7 @@ class Shade(VantageEntity):
         """Stop the shade."""
         self._vantage.send("BLIND", self._vid, "CLOSE")
 
-    def handle_update(self, args):
+    def handle_update(self, args, _):
         """Handle new value for shade.
 
         This callback is invoked from the VantageConnection thread.
