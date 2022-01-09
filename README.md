@@ -35,6 +35,26 @@ originally based.
 Get the source from github. To use with Home Assistant, see the
 https://github.com/gjbadros/hass-vantage package.
 
+## Distributing a new release to PyPi
+
+See the docs at https://packaging.python.org/en/latest/tutorials/packaging-projects/
+
+In a nutshell, you need to one time do
+
+    # assumes `python3 -m venv .` has already been run
+
+    source bin/activate
+    pip3 install --upgrade build
+    pip3 install --upgrade twine
+
+Then for a new distribution, built it with:
+
+    python3 -m build
+
+And upload it:
+
+    python3 -m twine upload --repository pypi dist/pyvantage-_.tar.gz # fill in the _ to just upload one
+
 ## Example
 
     import pyvantage
