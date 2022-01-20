@@ -218,6 +218,7 @@ class VantageConnection(threading.Thread):
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected but retrying")
             self._connected[i] = False
+            raise
 
     def send_ascii_nl(self, cmd):
         """Sends the specified command to the vantage controller.
