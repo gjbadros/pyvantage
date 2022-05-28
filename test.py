@@ -30,6 +30,8 @@ def parse_args():
                         help="Just parse the file instead of connecting to host")
     parser.add_argument('--run-tests', action='store_true', dest='run_tests',
                         help="Run various tests to demonstrate some functonality")
+    parser.add_argument('--run-new-tests', action='store_true', dest='run_new_tests',
+                        help="Run various tests to demonstrate some functonality")
     parser.add_argument('--get-levels-test', action='store_true', dest='get_levels_test',
                         help="Run various tests to demonstrate some functonality")
     parser.add_argument('--user', action='store', dest='user',
@@ -110,6 +112,13 @@ def various_tests(v):
     time.sleep(2)
     dwl.level = 100
 
+def run_new_tests(v):
+    while True:
+      ll = v._vid_to_load[3467]
+      ll.level = 90-ll.level
+      time.sleep(3)
+   
+
 
 def main():
     """Connect to a vantage server, parse config, and monitor events."""
@@ -148,6 +157,9 @@ def main():
 
     if args.run_tests:
         various_tests(v)
+
+    if args.run_new_tests:
+        run_new_tests(v)
 
     if args.get_levels_test:
         for vid in [3442, 3455, 3456, 3457, 3458, 3459, 3462, 3463, 3468, 3469, 3470, 3471, 3472, 3473, 3474, 3477, 3479, 3481, 3482, 3483, 3484, 3485, 3486, 3487, 3488, 3489, 3500, 3502, 3503, 3504, 3505, 3506, 3507, 3508, 3509, 3510, 3552, 3553, 3554, 3555, 3556, 3557, 3558, 3559, 3729, 3730, 3736, 4388, 4395, 4506, 4507, 4508, 4523, 4524, 4525, 4526, 4527, 4528, 4529, 4536, 4625, 4626, 4627, 4634, 4722, 4727, 5320, 5844, 5846, 5848, 5850, 5852, 5855, 6180, 6181, 6184, 6185, 6186, 6187, 6188, 6189, 6190, 6191, 6192, 6193, 6194, 6195, 6196, 6199, 7029, 7030, 7033, 7034, 7035, 7036, 7037, 7166, 7167]:
