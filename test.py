@@ -10,6 +10,7 @@
 import argparse
 import logging
 import time
+import traceback
 
 from pyvantage import Vantage
 
@@ -144,6 +145,7 @@ def main():
                          args.dc_filename)
             v.do_parse(xml_db)
         except Exception as e:
+            traceback.print_exc()
             _LOGGER.warning("Failed loading cached config: %s",
                             e)
         return
