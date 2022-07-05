@@ -20,8 +20,8 @@ For development, I do:
 
 $ docker-shell homeassistant
 > cd /usr/local/lib/python3.7/site-packages/pyvantage/
-> cp /config/pyvantage/pyvantage/_init__.py . 
-# or 
+> cp /config/pyvantage/pyvantage/_init__.py .
+# or
 > cp /config/pyvantage/pyvantage/__init__.py /usr/local/lib/python3.7/site-packages/pyvantage
 # where /config in the docker image points to my home assistant config directory
 # which has a pyvantage subdirectory containing a clone of the github repo.
@@ -67,6 +67,9 @@ __copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 # Keypad            | Keypad           | vc.keypads
 # DualRelayStation  | Keypad           | vc.keypads
 # IRZone            | Keypad           | vc.keypads
+# Dimmer            | Keypad           | vc.keypads
+# EqCtrl            | Keypad           | vc.keypads
+# EqUx              | Keypad           | vc.keypads
 # Button            | Button           | vc.buttons
 # DryContact        | Button           | vc.buttons
 # GMem              | Variable         | vc.variables
@@ -349,6 +352,7 @@ class VantageXmlDbParser():
         self.keypads = []
         self.sensors = []
         self.load_groups = []
+        self.last_area_vid = -1
         self.vid_to_area = {}
         self.vid_to_load = {}
         self.vid_to_keypad = {}
@@ -398,6 +402,7 @@ class VantageXmlDbParser():
             area = self._parse_area(area_xml)
             _LOGGER.debug("Area = %s", area)
             self.vid_to_area[area.vid] = area
+            self.last_area_vid = area.vid
 
         irzones = root.findall(".//Objects//IRZone[@VID]")
         for irzone_xml in irzones:
@@ -482,6 +487,9 @@ class VantageXmlDbParser():
         keypads = root.findall(".//Objects//Keypad[@VID]")
         keypads = keypads + root.findall(".//Objects//DualRelayStation[@VID]")
         keypads = keypads + root.findall(".//Objects//IRZone[@VID]")
+        keypads = keypads + root.findall(".//Objects//Dimmer[@VID]")
+        keypads = keypads + root.findall(".//Objects//EqCtrl[@VID]")
+        keypads = keypads + root.findall(".//Objects//EqUX[@VID]")
         for kp_xml in keypads:
             keypad = self._parse_keypad(kp_xml)
             _LOGGER.debug("keypad = %s", keypad)
@@ -657,9 +665,14 @@ class VantageXmlDbParser():
         """
         try:
             vid = int(shade_xml.get('VID'))
+            area_xml = shade_xml.find('Area')
+            area_vid = self.last_area_vid
+            if area_xml is not None:
+                area_vid = int(area_xml.text)
+
             shade = Shade(self._vantage,
                           name=shade_xml.find('Name').text,
-                          area_vid=int(shade_xml.find('Area').text),
+                          area_vid=area_vid,
                           vid=vid)
             return shade
         except Exception as e:
@@ -680,7 +693,10 @@ class VantageXmlDbParser():
                 out_name = out_name.strip()
             if not out_name or out_name.isspace():
                 out_name = output_xml.find('Name').text.strip()
-            area_vid = int(output_xml.find('Area').text)
+            area_xml = output_xml.find('Area')
+            area_vid = self.last_area_vid
+            if area_xml is not None:
+                area_vid = int(area_xml.text)
 
             area_name = self.vid_to_area[area_vid].name.strip()
             lt_xml = output_xml.find('LoadType')
@@ -781,10 +797,29 @@ class VantageXmlDbParser():
                 int(stop_xml.get('VID')) if stop_xml else None]
 
         shade_name = open_xml.find('Name').text.strip()[:-5]
-        area_vid = int(open_xml.find('Area').text)
-        if ((area_vid != int(close_xml.find('Area').text) or
-             (isopen_xml and area_vid != int(isopen_xml.find('Area').text)) or
-             (stop_xml and area_vid != int(stop_xml.find('Area').text)))):
+        area_xml = open_xml.find('Area')
+        area_vid = self.last_area_vid
+        if area_xml is not None:
+            area_vid = int(area_xml.text)
+
+        close_area_xml = close_xml and close_xml.find('Area')
+        close_area_vid = self.last_area_vid
+        if close_area_xml is not None:
+            close_area_vid = int(close_area_xml.text)
+
+        isopen_area_xml = isopen_xml and isopen_xml.find('Area')
+        isopen_area_vid = self.last_area_vid
+        if isopen_area_xml is not None:
+            isopen_area_vid = int(isopen_area_xml.text)
+
+        stop_area_xml = stop_xml and stop_xml.find('Area')
+        stop_area_vid = self.last_area_vid
+        if stop_area_xml is not None:
+            stop_area_vid = int(stop_area_xml.text)
+
+        if ((area_vid != close_area_vid) or
+             (isopen_xml and area_vid != isopen_area_vid) or
+             (stop_xml and area_vid != stop_area_vid)):
             _LOGGER.warning("open/close/stop/isopen device "
                             "areas do not match: %s", shade_name)
             return None
@@ -803,7 +838,10 @@ class VantageXmlDbParser():
             out_name = output_xml.find('Name').text
         else:
             _LOGGER.debug("Using dname = %s", out_name)
-        area_vid = int(output_xml.find('Area').text)
+        area_xml = output_xml.find('Area')
+        area_vid = self.last_area_vid
+        if area_xml is not None:
+            area_vid = int(area_xml.text)
 
 #        area_name = self.vid_to_area[area_vid].name
         loads = output_xml.findall('./LoadTable/Load')
@@ -919,7 +957,7 @@ class VantageXmlDbParser():
             text2 = button_xml.find('Text2').text
             desc = _desc_from_t1t2(text1, text2)
             num = int(parent.get('Position'))
-            keypad = self._vantage._ids['KEYPAD'].get(parent_vid)
+            keypad = self.vid_to_keypad.get(parent_vid)
             if keypad is None:
                 irzone = self.vid_to_area.get(parent_vid)
                 if irzone is None:
@@ -940,6 +978,8 @@ class VantageXmlDbParser():
         except Exception as e:
             _LOGGER.warning("Error parsing button vid = %d: %s",
                             vid, e)
+            traceback.print_exc()
+
 
 
 # Connect to port 2001 and write
@@ -2001,7 +2041,7 @@ class Shade3(VantageEntity):
         elif new_level == 100:
             self.open()
             self._level = 100
-        
+
     def __do_query_level(self):
         pass
 
@@ -2209,7 +2249,7 @@ class LoadGroup(Output):
             return self._vantage._vid_to_load.get(self._brightness_vid)._level
         else:
             return self._level
-    
+
     def _get_level(self):
         """Returns the output level of the group.
         Iff there is one non-color and one color load, then delegate to the non-color load."""
