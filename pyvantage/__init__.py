@@ -126,6 +126,7 @@ from xml.sax.saxutils import escape
 
 from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
+from xml.etree import ElementTree as ET
 
 
 def kelvin_to_level(kelvin):
@@ -353,7 +354,7 @@ class VantageXmlDbParser():
         self.sensors = []
         self.load_groups = []
         self.last_area_vid = -1
-        self.vid_to_area = {}
+        self.vid_to_area = vantage._vid_to_area = {}
         self.vid_to_load = {}
         self.vid_to_keypad = {}
         self.vid_to_button = {}
@@ -372,8 +373,6 @@ class VantageXmlDbParser():
         It interprets and creates all the relevant Vantage objects and
         stuffs them into the appropriate hierarchy.
         """
-
-        import xml.etree.ElementTree as ET
 
         root = ET.fromstring(self._xml_db_str)
         # The structure of a Lutron config is something like this:
@@ -455,8 +454,7 @@ class VantageXmlDbParser():
                                                 load_xml,
                                                 close_load_xml,
                                                 stop_load_xml)
-                    for v in shade.vids:
-                        skip_load_vids.add(v)
+                    skip_load_vids = { k for k in shade.vids if k is not None }
                     self.vid_to_shade[shade.vid] = shade
                     self.outputs.append(shade)
                     _LOGGER.debug("shade3 = %s", shade)
@@ -484,12 +482,8 @@ class VantageXmlDbParser():
             _LOGGER.debug("load group = %s", lgroup)
             self.vid_to_area[lgroup.area].add_output(lgroup)
 
-        keypads = objects.findall("Object/Keypad[@VID]")
-        keypads = keypads + objects.findall("Object/DualRelayStation[@VID]")
-        keypads = keypads + objects.findall("Object/IRZone[@VID]")
-        keypads = keypads + objects.findall("Object/Dimmer[@VID]")
-        keypads = keypads + objects.findall("Object/EqCtrl[@VID]")
-        keypads = keypads + objects.findall("Object/EqUX[@VID]")
+        keypads = [obj for t in ["Keypad", "DualRelayStation", "IRZone", "Dimmer", "EqCtrl", "EqUX"]
+                       for obj in objects.findall(f"Object/{t}[@VID]")]
         for kp_xml in keypads:
             keypad = self._parse_keypad(kp_xml)
             _LOGGER.debug("keypad = %s", keypad)
@@ -582,6 +576,14 @@ class VantageXmlDbParser():
 
         return True
 
+    def _object_area_vid(self, obj):
+        """Parses an Area element which designates the VID of the Area that the
+        object is located in."""
+        if obj is None: return self.last_area_vid
+        area = obj.find('Area')
+        if area is None: return self.last_area_vid
+        return int(area.text)
+
     def _parse_area(self, area_xml):
         """Parses an Area tag, which is effectively a room, depending on how the
         Vantage controller programming was done."""
@@ -589,7 +591,7 @@ class VantageXmlDbParser():
             vid = int(area_xml.get('VID'))
             area = Area(self._vantage,
                         name=area_xml.find('Name').text,
-                        parent=int(area_xml.find('Area').text),
+                        parent=self._object_area_vid(area_xml),
                         vid=vid,
                         note=area_xml.find('Note').text)
             return area
@@ -645,13 +647,11 @@ class VantageXmlDbParser():
         """Parses a LightSensor object."""
         try:
             vid = int(sensor_xml.get('VID'))
-            area_xml = sensor_xml.find('Area')
-            area = (area_xml is not None and int(area_xml.text)) or -1
             value_range = (float(sensor_xml.find('RangeLow').text),
                            float(sensor_xml.find('RangeHigh').text))
             return LightSensor(self._vantage,
                                name=sensor_xml.find('Name').text,
-                               area=area,
+                               area=self._object_area_vid(sensor_xml),
                                value_range=value_range,
                                vid=vid)
         except Exception as e:
@@ -665,14 +665,9 @@ class VantageXmlDbParser():
         """
         try:
             vid = int(shade_xml.get('VID'))
-            area_xml = shade_xml.find('Area')
-            area_vid = self.last_area_vid
-            if area_xml is not None:
-                area_vid = int(area_xml.text)
-
             shade = Shade(self._vantage,
                           name=shade_xml.find('Name').text,
-                          area_vid=area_vid,
+                          area_vid=self._object_area_vid(shade_xml),
                           vid=vid)
             return shade
         except Exception as e:
@@ -693,10 +688,7 @@ class VantageXmlDbParser():
                 out_name = out_name.strip()
             if not out_name or out_name.isspace():
                 out_name = output_xml.find('Name').text.strip()
-            area_xml = output_xml.find('Area')
-            area_vid = self.last_area_vid
-            if area_xml is not None:
-                area_vid = int(area_xml.text)
+            area_vid = self._object_area_vid(output_xml)
 
             area_name = self.vid_to_area[area_vid].name.strip()
             lt_xml = output_xml.find('LoadType')
@@ -797,25 +789,10 @@ class VantageXmlDbParser():
                 int(stop_xml.get('VID')) if stop_xml else None]
 
         shade_name = open_xml.find('Name').text.strip()[:-5]
-        area_xml = open_xml.find('Area')
-        area_vid = self.last_area_vid
-        if area_xml is not None:
-            area_vid = int(area_xml.text)
-
-        close_area_xml = close_xml and close_xml.find('Area')
-        close_area_vid = self.last_area_vid
-        if close_area_xml is not None:
-            close_area_vid = int(close_area_xml.text)
-
-        isopen_area_xml = isopen_xml and isopen_xml.find('Area')
-        isopen_area_vid = self.last_area_vid
-        if isopen_area_xml is not None:
-            isopen_area_vid = int(isopen_area_xml.text)
-
-        stop_area_xml = stop_xml and stop_xml.find('Area')
-        stop_area_vid = self.last_area_vid
-        if stop_area_xml is not None:
-            stop_area_vid = int(stop_area_xml.text)
+        area_vid = self._object_area_vid(open_xml)
+        close_area_vid = self._object_area_vid(close_xml)
+        isopen_area_vid = self._object_area_vid(isopen_xml)
+        stop_area_vid = self._object_area_vid(stop_xml)
 
         if ((area_vid != close_area_vid) or
              (isopen_xml and area_vid != isopen_area_vid) or
@@ -838,15 +815,10 @@ class VantageXmlDbParser():
             out_name = output_xml.find('Name').text
         else:
             _LOGGER.debug("Using dname = %s", out_name)
-        area_xml = output_xml.find('Area')
-        area_vid = self.last_area_vid
-        if area_xml is not None:
-            area_vid = int(area_xml.text)
+        area_vid = self._object_area_vid(output_xml)
 
-#        area_name = self.vid_to_area[area_vid].name
         loads = output_xml.findall('./LoadTable/Load')
-        vid = output_xml.get('VID')
-        vid = int(vid)
+        vid = int(output_xml.get('VID'))
 
         load_vids = []
         color_vids = []
@@ -879,11 +851,9 @@ class VantageXmlDbParser():
 
     def _parse_keypad(self, keypad_xml):
         """Parses a keypad device."""
-        area_xml = keypad_xml.find('Area')
-        area_vid = int(area_xml.text) if area_xml else -1
         keypad = Keypad(self._vantage,
                         name=keypad_xml.find('Name').text + ' [K]',
-                        area=area_vid,
+                        area=self._object_area_vid(keypad_xml),
                         vid=int(keypad_xml.get('VID')))
         return keypad
 
@@ -909,8 +879,7 @@ class VantageXmlDbParser():
             name = dc_xml.find('Name').text + ' [C]'
             parent = dc_xml.find('Parent')
             parent_vid = int(parent.text)
-            area_xml = dc_xml.find('Area')
-            area_vid = int(area_xml.text) if area_xml else -1
+            area_vid = self._object_area_vid(dc_xml)
             num = 0
             keypad = None
             _LOGGER.debug("Found DryContact with vid = %d", vid)
@@ -1143,19 +1112,18 @@ class Vantage():
 
         if obj.name in self._names:
             oldname = obj.name
-            obj.name += " (%s)" % (str(obj.vid))
+            obj.name += f" ({obj.vid})"
             if ('0-10V RELAYS' in oldname or
                 'NOT USED' in oldname or cmd_type == 'BTN'):
                 pass
             else:
-                _LOGGER.debug("Repeated name `%s' - adding vid to get %s",
-                              oldname, obj.name)
+                _LOGGER.debug(f"Repeated name `{oldname}' - adding vid to get {obj.name}")
         self._names[obj.name] = obj.vid
 
     # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
         """Invoked by the connection manager to process incoming data."""
-        _LOGGER.debug("#%s _recv got line: %s", i, line)
+        _LOGGER.debug(f"#{i} _recv got line: {line}")
         if line == '':
             return
         typ = None
@@ -1187,9 +1155,9 @@ class Vantage():
         # TODO: is it okay to ignore R:RAMPLOAD responses?
         # or do we need to handle_update_and_notify like with "LOAD",
         # below
-        if line[0] == 'R' and cmd_type in ('STATUS', 'ADDSTATUS',
+        if line[0] == 'R' and cmd_type in {'STATUS', 'ADDSTATUS',
                                            'DELSTATUS', 'INVOKE',
-                                           'GETCUSTOM', 'RAMPLOAD'):
+                                           'GETCUSTOM', 'RAMPLOAD'}:
             return
         if line[0] == 'R' and cmd_type == "ERROR":
             _LOGGER.warning("#%s Got %s on command: %s", i, line,
@@ -1199,8 +1167,8 @@ class Vantage():
         if cmd_type == 'ERROR':
             _LOGGER.error(" #%s _recv got ERROR line: %s", i, line)
             return
-        if cmd_type in ('GETLOAD', 'GETPOWER', 'GETCURRENT',
-                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'):
+        if cmd_type in {'GETLOAD', 'GETPOWER', 'GETCURRENT',
+                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'}:
             cmd_type = cmd_type[3:]  # strip "GET" from front
         elif cmd_type == 'GETBLIND':
             return
@@ -1371,7 +1339,6 @@ class Vantage():
             response = response.decode('ascii')
 
             # read XML preserving processing instructions
-            from xml.etree import ElementTree as ET
             response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
             response = response.find("GetFile/return")
             response = next(response.iter(tag=ET.ProcessingInstruction))
@@ -1396,12 +1363,6 @@ class Vantage():
     def do_parse(self, xml_db):
         """Call the parser and copy its output here."""
         parser = VantageXmlDbParser(vantage=self, xml_db_str=xml_db)
-        self._vid_to_load = parser.vid_to_load
-        self._vid_to_variable = parser.vid_to_variable
-        self._vid_to_area = parser.vid_to_area
-        self._vid_to_shade = parser.vid_to_shade
-        self._name = parser.project_name
-
         parser.parse()
         self.outputs = parser.outputs
         self.variables = parser.variables
@@ -1411,7 +1372,6 @@ class Vantage():
         self.sensors = parser.sensors
         self._vid_to_load = parser.vid_to_load
         self._vid_to_variable = parser.vid_to_variable
-        self._vid_to_area = parser.vid_to_area
         self._vid_to_shade = parser.vid_to_shade
         self._vid_to_task = parser.vid_to_task
         self._vid_to_sensor = parser.vid_to_sensor
