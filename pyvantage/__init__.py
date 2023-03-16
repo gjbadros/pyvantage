@@ -110,7 +110,6 @@ __copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 #  light.mh_m_great_room_big_ass_fan (load_type == Motor)
 
 import logging
-import telnetlib
 import socket
 import select
 import threading
@@ -181,9 +180,9 @@ class VantageConnection(threading.Thread):
         self._password = password
         self._cmd_port = cmd_port
         self._num_connections = num_connections
-        self._telnet = [None] * num_connections
+        self._sockets = [None] * num_connections
         self._connected = [False] * num_connections
-        self._iconn = 0  # index into the _telnet array
+        self._iconn = 0  # index into the _sockets array
         self._lock = threading.RLock()
         self._connect_cond = threading.Condition(lock=self._lock)
         self._recv_cb = recv_callback
@@ -217,7 +216,7 @@ class VantageConnection(threading.Thread):
             else:
                 _LOGGER.info("Vantage #%s send_ascii_nl: %s", i, cmd)
         try:
-            self._telnet[i].write(cmd.encode('ascii') + b'\r\n')
+            self._sockets[i].send(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected but retrying")
             self._connected[i] = False
@@ -232,12 +231,26 @@ class VantageConnection(threading.Thread):
             if not cmd.startswith("GET"):
                 self._iconn = (self._iconn + 1) % self._num_connections
 
+    def _read_until(self, delimiter, i):
+        """Read data from a socket until a delimiter is found."""
+        data = b''
+        while True:
+            chunk = self._sockets[i].recv(1024)
+            if not chunk:
+                break
+            data += chunk
+            if delimiter in data:
+                break
+        return data
+
     def _do_login_locked(self, i):
-        """Executes the login procedure (telnet) as well as setting up some
+        """Executes the login procedure as well as setting up some
         connection defaults like turning off the prompt, etc."""
         while True:
             try:
-                self._telnet[i] = telnetlib.Telnet(self._host, self._cmd_port)
+                self._sockets[i] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._sockets[i].settimeout(2)
+                self._sockets[i].connect((self._host, self._cmd_port))
                 break
             except Exception as e:
                 _LOGGER.warning("Could not connect #%s to %s:%d, "
@@ -251,22 +264,29 @@ class VantageConnection(threading.Thread):
             self._send_ascii_nl_locked("LOGIN " + self._user +
                                        " " + self._password, i)
             _LOGGER.debug("reading login response for #%s", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
         if i == 0:
             self._send_ascii_nl_locked("STATUS LOAD", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS BLIND", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS BTN", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS VARIABLE", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
         return True
 
     def _disconnect_locked(self):
         self._connected = [False] * self._num_connections
         self._connect_cond.notify_all()
-        self._telnet = [None] * self._num_connections
+
+        for i in range(0, self._num_connections):
+            self._sockets[i].close()
+            self._sockets[i] = None
+
         _LOGGER.warning("Disconnected")
 
     def _maybe_reconnect(self):
@@ -290,14 +310,13 @@ class VantageConnection(threading.Thread):
         while True:
             self._maybe_reconnect()
             try:
-                sockets = [t.get_socket() for t in self._telnet]
-                readable, _, exceptional = select.select(sockets, [], [])
-                for i, t in enumerate(self._telnet):
-                    if t.get_socket() in exceptional:
+                readable, _, exceptional = select.select(self._sockets, [], [])
+                for i, sock in enumerate(self._sockets):
+                    if sock in exceptional:
                         _LOGGER.error("Exceptional socket #%s: %s", i, t)
                         raise EOFError()
-                    if t.get_socket() in readable:
-                        line = self._telnet[i].read_until(b"\n", 2)
+                    if sock in readable:
+                        line = self._read_until(b'\n', i)
                         self._recv_cb(line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
@@ -309,7 +328,6 @@ class VantageConnection(threading.Thread):
                 with self._lock:
                     self._disconnect_locked()
                 continue
-
 
 def _desc_from_t1t2(title1, title2):
     if not title2:
