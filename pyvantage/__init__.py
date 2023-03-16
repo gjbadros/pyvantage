@@ -249,8 +249,8 @@ class VantageConnection(threading.Thread):
         while True:
             try:
                 self._sockets[i] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._sockets[i].settimeout(2)
                 self._sockets[i].connect((self._host, self._cmd_port))
+                self._sockets[i].settimeout(2)
                 break
             except Exception as e:
                 _LOGGER.warning("Could not connect #%s to %s:%d, "
