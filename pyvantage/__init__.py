@@ -111,6 +111,7 @@ __copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 
 import logging
 import socket
+import ssl
 import select
 import threading
 import time
@@ -171,7 +172,7 @@ class VantageConnection(threading.Thread):
     """Encapsulates the connection to the Vantage controller."""
 
     def __init__(self, host, user, password, cmd_port, recv_callback,
-                 commdebug=True, num_connections=2):
+                 commdebug=True, num_connections=2, use_ssl=False):
         """Initializes the vantage connection, doesn't actually connect."""
         threading.Thread.__init__(self, name="VantageConnection")
 
@@ -179,6 +180,7 @@ class VantageConnection(threading.Thread):
         self._user = user
         self._password = password
         self._cmd_port = cmd_port
+        self._use_ssl = use_ssl
         self._num_connections = num_connections
         self._sockets = [None] * num_connections
         self._connected = [False] * num_connections
@@ -188,6 +190,9 @@ class VantageConnection(threading.Thread):
         self._recv_cb = recv_callback
         self._done = False
         self._commdebug = commdebug
+
+        if use_ssl:
+            self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
 
         self.setDaemon(True)
 
@@ -250,6 +255,10 @@ class VantageConnection(threading.Thread):
             try:
                 self._sockets[i] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._sockets[i].connect((self._host, self._cmd_port))
+
+                if self._use_ssl:
+                    self._sockets[i] = self._ssl_context.wrap_socket(self._sockets[i])
+
                 self._sockets[i].settimeout(2)
                 break
             except Exception as e:
@@ -1029,7 +1038,8 @@ class Vantage():
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
                  name_mappings=None, filename=None,
-                 commdebug=True, num_connections=1):
+                 commdebug=True, num_connections=1,
+                 use_ssl=False):
         """Initializes the Vantage object. No connection is made to the remote
         device."""
         self._host = host
@@ -1039,7 +1049,7 @@ class Vantage():
         if self._host is not None:
             self._conn = VantageConnection(host, user, password, cmd_port,
                                            self._recv, commdebug,
-                                           num_connections)
+                                           num_connections, use_ssl)
         else:
             self._conn = None
             if filename is None:
@@ -1047,6 +1057,7 @@ class Vantage():
         self._cmds = deque([])
         self._name_mappings = name_mappings
         self._file_port = file_port
+        self._use_ssl = use_ssl
         self._only_areas = only_areas
         self._exclude_areas = exclude_areas
         self._ids = {}
@@ -1074,6 +1085,9 @@ class Vantage():
         self.buttons = None
         self.keypads = None
         self.sensors = None
+
+        if use_ssl:
+            self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
 
     def subscribe(self, obj, handler):
         """Subscribes to status updates of the requested object.
@@ -1345,6 +1359,10 @@ class Vantage():
                 _LOGGER.info("Vantage config cache is disabled.")
             ts = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             ts.connect((self._host, self._file_port))
+
+            if self._use_ssl:
+                ts = self._ssl_context.wrap_socket(ts)
+
             if self._user:
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
