@@ -1032,7 +1032,6 @@ class Vantage():
         self._only_areas = only_areas
         self._exclude_areas = exclude_areas
         self._ids = {}
-        self._names = {}   # maps from unique name to id
         self._subscribers = {}
         self._vid_to_area = {}  # copied out from the parser
         self._vid_to_load = {}  # copied out from the parser
@@ -1140,17 +1139,6 @@ class Vantage():
             obj.name = name + obj.name[len(name):]
         else:
             obj.name = name + obj.name
-
-        if obj.name in self._names:
-            oldname = obj.name
-            obj.name += " (%s)" % (str(obj.vid))
-            if ('0-10V RELAYS' in oldname or
-                'NOT USED' in oldname or cmd_type == 'BTN'):
-                pass
-            else:
-                _LOGGER.debug("Repeated name `%s' - adding vid to get %s",
-                              oldname, obj.name)
-        self._names[obj.name] = obj.vid
 
     # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
