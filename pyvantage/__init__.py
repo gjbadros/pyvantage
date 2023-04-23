@@ -110,8 +110,8 @@ __copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
 #  light.mh_m_great_room_big_ass_fan (load_type == Motor)
 
 import logging
-import telnetlib
 import socket
+import ssl
 import select
 import threading
 import time
@@ -124,10 +124,8 @@ import traceback
 from collections import deque
 from xml.sax.saxutils import escape
 
-from colormath.color_objects import sRGBColor, HSVColor
-from colormath.color_conversions import convert_color
+from colorsys import hsv_to_rgb, rgb_to_hsv
 from xml.etree import ElementTree as ET
-
 
 def kelvin_to_level(kelvin):
     """Convert kelvin temperature to a USAI level."""
@@ -173,7 +171,7 @@ class VantageConnection(threading.Thread):
     """Encapsulates the connection to the Vantage controller."""
 
     def __init__(self, host, user, password, cmd_port, recv_callback,
-                 commdebug=True, num_connections=2):
+                 commdebug=True, num_connections=2, use_ssl=False):
         """Initializes the vantage connection, doesn't actually connect."""
         threading.Thread.__init__(self, name="VantageConnection")
 
@@ -181,15 +179,19 @@ class VantageConnection(threading.Thread):
         self._user = user
         self._password = password
         self._cmd_port = cmd_port
+        self._use_ssl = use_ssl
         self._num_connections = num_connections
-        self._telnet = [None] * num_connections
+        self._sockets = [None] * num_connections
         self._connected = [False] * num_connections
-        self._iconn = 0  # index into the _telnet array
+        self._iconn = 0  # index into the _sockets array
         self._lock = threading.RLock()
         self._connect_cond = threading.Condition(lock=self._lock)
         self._recv_cb = recv_callback
         self._done = False
         self._commdebug = commdebug
+
+        if use_ssl:
+            self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
 
         self.setDaemon(True)
 
@@ -218,7 +220,7 @@ class VantageConnection(threading.Thread):
             else:
                 _LOGGER.info("Vantage #%s send_ascii_nl: %s", i, cmd)
         try:
-            self._telnet[i].write(cmd.encode('ascii') + b'\r\n')
+            self._sockets[i].send(cmd.encode('ascii') + b'\r\n')
         except BrokenPipeError:
             _LOGGER.warning("Vantage BrokenPipeError - disconnected but retrying")
             self._connected[i] = False
@@ -233,12 +235,30 @@ class VantageConnection(threading.Thread):
             if not cmd.startswith("GET"):
                 self._iconn = (self._iconn + 1) % self._num_connections
 
+    def _read_until(self, delimiter, i):
+        """Read data from a socket until a delimiter is found."""
+        data = b''
+        while True:
+            chunk = self._sockets[i].recv(1024)
+            if not chunk:
+                break
+            data += chunk
+            if delimiter in data:
+                break
+        return data
+
     def _do_login_locked(self, i):
-        """Executes the login procedure (telnet) as well as setting up some
+        """Executes the login procedure as well as setting up some
         connection defaults like turning off the prompt, etc."""
         while True:
             try:
-                self._telnet[i] = telnetlib.Telnet(self._host, self._cmd_port)
+                self._sockets[i] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._sockets[i].connect((self._host, self._cmd_port))
+
+                if self._use_ssl:
+                    self._sockets[i] = self._ssl_context.wrap_socket(self._sockets[i])
+
+                self._sockets[i].settimeout(2)
                 break
             except Exception as e:
                 _LOGGER.warning("Could not connect #%s to %s:%d, "
@@ -252,22 +272,29 @@ class VantageConnection(threading.Thread):
             self._send_ascii_nl_locked("LOGIN " + self._user +
                                        " " + self._password, i)
             _LOGGER.debug("reading login response for #%s", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
         if i == 0:
             self._send_ascii_nl_locked("STATUS LOAD", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS BLIND", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS BTN", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
+
             self._send_ascii_nl_locked("STATUS VARIABLE", i)
-            self._telnet[i].read_until(b'\r\n', 2)
+            self._read_until(b'\r\n', i)
         return True
 
     def _disconnect_locked(self):
         self._connected = [False] * self._num_connections
         self._connect_cond.notify_all()
-        self._telnet = [None] * self._num_connections
+
+        for i in range(0, self._num_connections):
+            self._sockets[i].close()
+            self._sockets[i] = None
+
         _LOGGER.warning("Disconnected")
 
     def _maybe_reconnect(self):
@@ -291,14 +318,13 @@ class VantageConnection(threading.Thread):
         while True:
             self._maybe_reconnect()
             try:
-                sockets = [t.get_socket() for t in self._telnet]
-                readable, _, exceptional = select.select(sockets, [], [])
-                for i, t in enumerate(self._telnet):
-                    if t.get_socket() in exceptional:
+                readable, _, exceptional = select.select(self._sockets, [], [])
+                for i, sock in enumerate(self._sockets):
+                    if sock in exceptional:
                         _LOGGER.error("Exceptional socket #%s: %s", i, t)
                         raise EOFError()
-                    if t.get_socket() in readable:
-                        line = self._telnet[i].read_until(b"\n", 2)
+                    if sock in readable:
+                        line = self._read_until(b'\n', i)
                         self._recv_cb(line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
@@ -310,7 +336,6 @@ class VantageConnection(threading.Thread):
                 with self._lock:
                     self._disconnect_locked()
                 continue
-
 
 def _desc_from_t1t2(title1, title2):
     if not title2:
@@ -980,7 +1005,9 @@ class Vantage():
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
                  name_mappings=None, filename=None,
-                 commdebug=True, num_connections=1):
+                 commdebug=True, num_connections=1,
+                 hierarchical_names=True,
+                 use_ssl=False):
         """Initializes the Vantage object. No connection is made to the remote
         device."""
         self._host = host
@@ -990,7 +1017,7 @@ class Vantage():
         if self._host is not None:
             self._conn = VantageConnection(host, user, password, cmd_port,
                                            self._recv, commdebug,
-                                           num_connections)
+                                           num_connections, use_ssl)
         else:
             self._conn = None
             if filename is None:
@@ -998,10 +1025,12 @@ class Vantage():
         self._cmds = deque([])
         self._name_mappings = name_mappings
         self._file_port = file_port
+        self._use_ssl = use_ssl
         self._only_areas = only_areas
         self._exclude_areas = exclude_areas
-        self._ids = {}
+        self._hierarchical_names = hierarchical_names
         self._names = {}   # maps from unique name to id
+        self._ids = {}
         self._subscribers = {}
         self._vid_to_area = {}  # copied out from the parser
         self._vid_to_load = {}  # copied out from the parser
@@ -1025,6 +1054,9 @@ class Vantage():
         self.buttons = None
         self.keypads = None
         self.sensors = None
+
+        if use_ssl:
+            self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
 
     def subscribe(self, obj, handler):
         """Subscribes to status updates of the requested object.
@@ -1077,39 +1109,38 @@ class Vantage():
         if cmd_type2:
             self._ids[cmd_type2][vid] = obj
 
-        # Now give the object a unique name.  We prefix in reverse order the
-        # areas the object is contained in.  So an object may be called "Main
-        # Floor-Kitchen-Ceiling Can Lights".  Every object must have a unique
-        # name, if there is a duplicate then (VID) is attached to the end.
+        # If configured, generate hierarchical object names.
+        # We prefix in reverse order the areas the object is contained in, eg:
+        # "Main Floor-Kitchen-Ceiling Can Lights"
+        if self._hierarchical_names:
+            lineage = self.get_lineage_from_obj(obj)
+            name = ""
+            # reverse all but the last element in list
+            for n in reversed(lineage[:-1]):
+                ns = n.strip()
+                if ns.startswith('Station Load '):
+                    continue
+                if ns.startswith('Color Load '):
+                    continue
+                if self._name_mappings:
+                    mapped_name = self._name_mappings.get(ns.lower())
+                    if mapped_name is not None:
+                        if mapped_name is True:
+                            continue
+                        ns = mapped_name
+                name += ns + "-"
 
-        lineage = self.get_lineage_from_obj(obj)
-        name = ""
-        # reverse all but the last element in list
-        for n in reversed(lineage[:-1]):
-            ns = n.strip()
-            if ns.startswith('Station Load '):
-                continue
-            if ns.startswith('Color Load '):
-                continue
-            if self._name_mappings:
-                mapped_name = self._name_mappings.get(ns.lower())
-                if mapped_name is not None:
-                    if mapped_name is True:
-                        continue
-                    ns = mapped_name
-            name += ns + "-"
-
-        # TODO: this may be a little too hacky
-        # Greg Badros has a convention of naming areas using 2-letter codes.
-        # This makes sure that we use "GH-Bedroom High East"
-        # instead of "GH-GH Bedroom High East"
-        # since it's sometimes convenient to have the short area
-        # at the start of the device name in vantage
-        if obj.name.startswith(name[0:-1]):
-            obj.name = name + obj.name[len(name):]
-        else:
-            obj.name = name + obj.name
-
+            # TODO: this may be a little too hacky
+            # Greg Badros has a convention of naming areas using 2-letter codes.
+            # This makes sure that we use "GH-Bedroom High East"
+            # instead of "GH-GH Bedroom High East"
+            # since it's sometimes convenient to have the short area
+            # at the start of the device name in vantage
+            if obj.name.startswith(name[0:-1]):
+                obj.name = name + obj.name[len(name):]
+            else:
+                obj.name = name + obj.name
+                
         if obj.name in self._names:
             oldname = obj.name
             obj.name += f" ({obj.vid})"
@@ -1119,6 +1150,7 @@ class Vantage():
             else:
                 _LOGGER.debug(f"Repeated name `{oldname}' - adding vid to get {obj.name}")
         self._names[obj.name] = obj.vid
+
 
     # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
@@ -1295,6 +1327,10 @@ class Vantage():
                 _LOGGER.info("Vantage config cache is disabled.")
             ts = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             ts.connect((self._host, self._file_port))
+
+            if self._use_ssl:
+                ts = self._ssl_context.wrap_socket(ts)
+
             if self._user:
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
@@ -1812,9 +1848,8 @@ class Output(VantageEntity):
         _LOGGER.debug("%s: rgb = %s", self,
                       json.dumps(new_rgb))
         # INVOKE [vid] RGBLoad.SetRGBW [val0], [val1], [val2], [val3]
-        srgb = sRGBColor(*new_rgb)
-        hs_color = convert_color(srgb, HSVColor)
-        self._hs = [hs_color.hsv_h, hs_color.hsv_s * 100.0]
+        hs_color = rgb_to_hsv(*new_rgb)
+        self._hs = [hs_color[0] * 360.0, hs_color[1] * 100.0]
         self._rgb = new_rgb
         self._rgb_is_dirty = True
         if self._level > 0:
@@ -1846,9 +1881,7 @@ class Output(VantageEntity):
         _LOGGER.debug("%s: hs = %s", self,
                       json.dumps(new_hs))
         self._hs = new_hs
-        hs_color = HSVColor(new_hs[0], new_hs[1]/100.0, 1.0)
-        rgb = convert_color(hs_color, sRGBColor)
-        self._rgb = [rgb.rgb_r, rgb.rgb_g, rgb.rgb_b]
+        self._rgb = list(hsv_to_rgb(new_hs[0]/360.0, new_hs[1]/100.0, 1.0))
         self._invoke_hs()
 
     def _invoke_hs(self):
