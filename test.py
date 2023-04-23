@@ -118,7 +118,7 @@ def run_new_tests(v):
       ll = v._vid_to_load[3467]
       ll.level = 90-ll.level
       time.sleep(3)
-   
+
 
 
 def main():
