@@ -1011,7 +1011,8 @@ class Vantage():
                  only_areas=None, exclude_areas=None,
                  cmd_port=3001, file_port=2001,
                  name_mappings=None, filename=None,
-                 commdebug=True, num_connections=1):
+                 commdebug=True, num_connections=1,
+                 hierarchical_names=True):
         """Initializes the Vantage object. No connection is made to the remote
         device."""
         self._host = host
@@ -1031,8 +1032,8 @@ class Vantage():
         self._file_port = file_port
         self._only_areas = only_areas
         self._exclude_areas = exclude_areas
+        self._hierarchical_names = hierarchical_names
         self._ids = {}
-        self._names = {}   # maps from unique name to id
         self._subscribers = {}
         self._vid_to_area = {}  # copied out from the parser
         self._vid_to_load = {}  # copied out from the parser
@@ -1108,49 +1109,37 @@ class Vantage():
         if cmd_type2:
             self._ids[cmd_type2][vid] = obj
 
-        # Now give the object a unique name.  We prefix in reverse order the
-        # areas the object is contained in.  So an object may be called "Main
-        # Floor-Kitchen-Ceiling Can Lights".  Every object must have a unique
-        # name, if there is a duplicate then (VID) is attached to the end.
+        # If configured, generate hierarchical object names.
+        # We prefix in reverse order the areas the object is contained in, eg:
+        # "Main Floor-Kitchen-Ceiling Can Lights"
+        if self._hierarchical_names:
+            lineage = self.get_lineage_from_obj(obj)
+            name = ""
+            # reverse all but the last element in list
+            for n in reversed(lineage[:-1]):
+                ns = n.strip()
+                if ns.startswith('Station Load '):
+                    continue
+                if ns.startswith('Color Load '):
+                    continue
+                if self._name_mappings:
+                    mapped_name = self._name_mappings.get(ns.lower())
+                    if mapped_name is not None:
+                        if mapped_name is True:
+                            continue
+                        ns = mapped_name
+                name += ns + "-"
 
-        lineage = self.get_lineage_from_obj(obj)
-        name = ""
-        # reverse all but the last element in list
-        for n in reversed(lineage[:-1]):
-            ns = n.strip()
-            if ns.startswith('Station Load '):
-                continue
-            if ns.startswith('Color Load '):
-                continue
-            if self._name_mappings:
-                mapped_name = self._name_mappings.get(ns.lower())
-                if mapped_name is not None:
-                    if mapped_name is True:
-                        continue
-                    ns = mapped_name
-            name += ns + "-"
-
-        # TODO: this may be a little too hacky
-        # Greg Badros has a convention of naming areas using 2-letter codes.
-        # This makes sure that we use "GH-Bedroom High East"
-        # instead of "GH-GH Bedroom High East"
-        # since it's sometimes convenient to have the short area
-        # at the start of the device name in vantage
-        if obj.name.startswith(name[0:-1]):
-            obj.name = name + obj.name[len(name):]
-        else:
-            obj.name = name + obj.name
-
-        if obj.name in self._names:
-            oldname = obj.name
-            obj.name += " (%s)" % (str(obj.vid))
-            if ('0-10V RELAYS' in oldname or
-                'NOT USED' in oldname or cmd_type == 'BTN'):
-                pass
+            # TODO: this may be a little too hacky
+            # Greg Badros has a convention of naming areas using 2-letter codes.
+            # This makes sure that we use "GH-Bedroom High East"
+            # instead of "GH-GH Bedroom High East"
+            # since it's sometimes convenient to have the short area
+            # at the start of the device name in vantage
+            if obj.name.startswith(name[0:-1]):
+                obj.name = name + obj.name[len(name):]
             else:
-                _LOGGER.debug("Repeated name `%s' - adding vid to get %s",
-                              oldname, obj.name)
-        self._names[obj.name] = obj.vid
+                obj.name = name + obj.name
 
     # Note: invoked on VantageConnection thread.
     def _recv(self, line, i=0):
