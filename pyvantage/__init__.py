@@ -435,7 +435,7 @@ class VantageXmlDbParser():
             self.vid_to_area[area.vid] = area
 
         # note the extra '/' after 'Object/ -- the Vantage.DDGColorLoad elements aren't always direct descendents of Object
-        loads = objects.findall("Object/Load[@VID]") + objects.findall("Object//Vantage.DDGColorLoad[@VID]")
+        loads = objects.findall("Object/Load[@VID]") + objects.findall("Object/Vantage.DDGColorLoad[@VID]")
         other_loads = []
         color_loads = []
         open_loads = []
@@ -1399,13 +1399,6 @@ class Vantage():
     def do_parse(self, xml_db):
         """Call the parser and copy its output here."""
         parser = VantageXmlDbParser(vantage=self, xml_db_str=xml_db)
-        parser.parse()
-        self.outputs = parser.outputs
-        self.variables = parser.variables
-        self.tasks = parser.tasks
-        self.buttons = parser.buttons
-        self.keypads = parser.keypads
-        self.sensors = parser.sensors
         self._vid_to_load = parser.vid_to_load
         self._vid_to_variable = parser.vid_to_variable
         self._vid_to_shade = parser.vid_to_shade
@@ -1413,6 +1406,13 @@ class Vantage():
         self._vid_to_sensor = parser.vid_to_sensor
         self._name_to_task = parser.name_to_task
         self._name = parser.project_name
+        parser.parse()
+        self.outputs = parser.outputs
+        self.variables = parser.variables
+        self.tasks = parser.tasks
+        self.buttons = parser.buttons
+        self.keypads = parser.keypads
+        self.sensors = parser.sensors
 
         _LOGGER.info("Found Vantage project: %s, %d areas, %d loads, "
                      "%d variables, and %d shades",
