@@ -29,7 +29,7 @@ $ docker-shell homeassistant
 """
 
 __Author__ = "Greg J. Badros"
-__copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
+__copyright__ = "Copyright 2018-2023 Greg J. Badros"
 
 # USAGE:
 #
@@ -324,7 +324,9 @@ class VantageConnection(threading.Thread):
                         raise EOFError()
                     if sock in readable:
                         line = self._read_until(b'\r\n', i)
-                        self._recv_cb(line.decode('ascii').rstrip(), i)
+                        lines = line.splitlines()
+                        for each_line in lines:
+                            self._recv_cb(each_line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:
@@ -1175,6 +1177,9 @@ class Vantage():
             _LOGGER.error("#%s _recv got unknown line start character: %s", i, line)
             return
         parts = re.split(r'[ :]', line[2:])
+        if len(parts) < 2:
+            _LOGGER.error("#%s Got partial line: %s", i, line)
+            return
         cmd_type = parts[0]
         vid = parts[1]
         args = parts[2:]
@@ -2431,7 +2436,11 @@ class PollingSensor(VantageSensor):
             else:
                 value = float(args[0])
         except Exception:
-            value = args[0]
+            if len(args) >= 1:
+                value = args[0]
+            else:
+                _LOGGER.error("No args for sensor value (%s) %s (%d)", self._name, self._kind, self._vid)
+                return self
         _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
                       self._name, self._kind, self._vid, value)
         self._value = value
