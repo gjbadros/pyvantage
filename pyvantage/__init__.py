@@ -323,7 +323,7 @@ class VantageConnection(threading.Thread):
                         _LOGGER.error("Exceptional socket #%s: %s", i, t)
                         raise EOFError()
                     if sock in readable:
-                        line = self._read_until(b'\n', i)
+                        line = self._read_until(b'\r\n', i)
                         self._recv_cb(line.decode('ascii').rstrip(), i)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
@@ -1172,7 +1172,7 @@ class Vantage():
             cmds = self._s_cmds
             typ = 'S'
         else:
-            _LOGGER.error("#%s _recv got unknown line start character", i)
+            _LOGGER.error("#%s _recv got unknown line start character: %s", i, line)
             return
         parts = re.split(r'[ :]', line[2:])
         cmd_type = parts[0]
