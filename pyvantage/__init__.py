@@ -239,19 +239,15 @@ class VantageConnection(threading.Thread):
         """Read data from a socket until a delimiter is found."""
         try:
             while True:
-                new_chunk = self._sockets[i].recv(1024, socket.MSG_DONTWAIT)
+                if delimiter in self._chunk:
+                    break
+                new_chunk = self._sockets[i].recv(1024)
                 if not new_chunk:
                     break
                 self._chunk += new_chunk
-                if delimiter and delimiter in self._chunk:
-                    break
         except socket.timeout:
             pass
-        if delimiter:
-            [data, self._chunk] = self._chunk.split(delimiter, 1)
-        else:
-            data = self._chunk
-            self._chunk = b''
+        [data, self._chunk] = self._chunk.split(delimiter, 1)
         return data
 
     def _do_login_locked(self, i):
@@ -279,19 +275,19 @@ class VantageConnection(threading.Thread):
             self._send_ascii_nl_locked("LOGIN " + self._user +
                                        " " + self._password, i)
             _LOGGER.debug("reading login response for #%s", i)
-            self._read_until(False, i)
+            self._read_until(b'\r\n', i)
         if i == 0:
             self._send_ascii_nl_locked("STATUS LOAD", i)
-            self._read_until(False, i)
+            self._read_until(b'\r\n', i)
 
             self._send_ascii_nl_locked("STATUS BLIND", i)
-            self._read_until(False, i)
+            self._read_until(b'\r\n', i)
 
             self._send_ascii_nl_locked("STATUS BTN", i)
-            self._read_until(False, i)
+            self._read_until(b'\r\n', i)
 
             self._send_ascii_nl_locked("STATUS VARIABLE", i)
-            self._read_until(False, i)
+            self._read_until(b'\r\n', i)
         return True
 
     def _disconnect_locked(self):
@@ -1214,10 +1210,8 @@ class Vantage():
             _LOGGER.error(" #%s _recv got ERROR line: %s", i, line)
             return
         if cmd_type in {'GETLOAD', 'GETPOWER', 'GETCURRENT',
-                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'}:
+                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT', 'GETBLIND'}:
             cmd_type = cmd_type[3:]  # strip "GET" from front
-        elif cmd_type == 'GETBLIND':
-            return
         elif cmd_type == 'TASK':
             return
         elif cmd_type == 'VARIABLE':
@@ -1240,7 +1234,7 @@ class Vantage():
             if (typ == 'S' or
                     (typ == 'R' and
                      cmd_type in ('LOAD', 'POWER', 'CURRENT',
-                                  'VARIABLE', 'SENSOR', 'LIGHT'))):
+                                  'VARIABLE', 'SENSOR', 'LIGHT', 'BLIND'))):
                 self.handle_update_and_notify(obj, args, vid)
 
     # Note: invoked on VantageConnection thread.
