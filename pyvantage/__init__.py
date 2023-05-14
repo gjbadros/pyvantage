@@ -326,7 +326,10 @@ class VantageConnection(threading.Thread):
                         line = self._read_until(b'\r\n', i)
                         lines = line.splitlines()
                         for each_line in lines:
-                            self._recv_cb(each_line.decode('ascii').rstrip(), i)
+                            try:
+                                self._recv_cb(each_line.decode('ascii').rstrip(), i)
+                            except Exception as e:
+                                _LOGGER.error("Exception in recv_cb on line %s: %s", each_line, e)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:
