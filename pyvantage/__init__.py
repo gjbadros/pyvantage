@@ -189,6 +189,7 @@ class VantageConnection(threading.Thread):
         self._recv_cb = recv_callback
         self._done = False
         self._commdebug = commdebug
+        self._chunk = b''
 
         if use_ssl:
             self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
@@ -236,14 +237,14 @@ class VantageConnection(threading.Thread):
 
     def _read_until(self, delimiter, i):
         """Read data from a socket until a delimiter is found."""
-        data = b''
         while True:
-            chunk = self._sockets[i].recv(1024)
-            if not chunk:
+            new_chunk = self._sockets[i].recv(1024)
+            if not new_chunk:
                 break
-            data += chunk
-            if delimiter in data:
+            self._chunk += new_chunk
+            if delimiter in self._chunk:
                 break
+        [data, self._chunk] = self._chunk.split(delimiter, 1)
         return data
 
     def _do_login_locked(self, i):
