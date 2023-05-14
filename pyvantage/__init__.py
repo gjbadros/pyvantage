@@ -237,14 +237,21 @@ class VantageConnection(threading.Thread):
 
     def _read_until(self, delimiter, i):
         """Read data from a socket until a delimiter is found."""
-        while True:
-            new_chunk = self._sockets[i].recv(1024)
-            if not new_chunk:
-                break
-            self._chunk += new_chunk
-            if delimiter in self._chunk:
-                break
-        [data, self._chunk] = self._chunk.split(delimiter, 1)
+        try:
+            while True:
+                new_chunk = self._sockets[i].recv(1024, socket.MSG_DONTWAIT)
+                if not new_chunk:
+                    break
+                self._chunk += new_chunk
+                if delimiter and delimiter in self._chunk:
+                    break
+        except socket.timeout:
+            pass
+        if delimiter:
+            [data, self._chunk] = self._chunk.split(delimiter, 1)
+        else:
+            data = self._chunk
+            self._chunk = b''
         return data
 
     def _do_login_locked(self, i):
@@ -272,19 +279,19 @@ class VantageConnection(threading.Thread):
             self._send_ascii_nl_locked("LOGIN " + self._user +
                                        " " + self._password, i)
             _LOGGER.debug("reading login response for #%s", i)
-            self._read_until(b'\r\n', i)
+            self._read_until(False, i)
         if i == 0:
             self._send_ascii_nl_locked("STATUS LOAD", i)
-            self._read_until(b'\r\n', i)
+            self._read_until(False, i)
 
             self._send_ascii_nl_locked("STATUS BLIND", i)
-            self._read_until(b'\r\n', i)
+            self._read_until(False, i)
 
             self._send_ascii_nl_locked("STATUS BTN", i)
-            self._read_until(b'\r\n', i)
+            self._read_until(False, i)
 
             self._send_ascii_nl_locked("STATUS VARIABLE", i)
-            self._read_until(b'\r\n', i)
+            self._read_until(False, i)
         return True
 
     def _disconnect_locked(self):
@@ -325,12 +332,10 @@ class VantageConnection(threading.Thread):
                         raise EOFError()
                     if sock in readable:
                         line = self._read_until(b'\r\n', i)
-                        lines = line.splitlines()
-                        for each_line in lines:
-                            try:
-                                self._recv_cb(each_line.decode('ascii').rstrip(), i)
-                            except Exception as e:
-                                _LOGGER.error("Exception in recv_cb on line %s: %s", each_line, e)
+                        try:
+                            self._recv_cb(line.decode('ascii').rstrip(), i)
+                        except Exception as e:
+                            _LOGGER.error("Exception in recv_cb on line %s: %s", line, e)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:

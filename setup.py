@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pyvantage',
-    version='0.0.47',
+    version='0.0.48',
     license='MIT',
     description='Python library for Vantage Controller (for Home Assistant)',
     author='Greg J. Badros',
