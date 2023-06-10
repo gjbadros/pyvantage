@@ -1340,6 +1340,7 @@ class Vantage():
                 ts = self._ssl_context.wrap_socket(ts)
 
             if self._user:
+                _LOGGER.debug("trying to login")
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
                          "</call></Login></ILogin>\n"
@@ -1381,13 +1382,18 @@ class Vantage():
             _LOGGER.debug("done reading, size = %s", len(response))
 
             response = response.decode('ascii')
+            orig_response = response
 
-            # read XML preserving processing instructions
-            response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
-            response = response.find("GetFile/return")
-            response = next(response.iter(tag=ET.ProcessingInstruction))
-            response = response.text.split()[2][1:]
-            xml_db = base64.b64decode(response).decode('utf-8')
+            try:
+                # read XML preserving processing instructions
+                response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
+                response = response.find("GetFile/return")
+                response = next(response.iter(tag=ET.ProcessingInstruction))
+                response = response.text.split()[2][1:]
+                xml_db = base64.b64decode(response).decode('utf-8')
+            except Exception as e:
+                _LOGGER.warning("Could not parse XML response:\n\"\"\"\n%s\n\"\"\"", orig_response)
+                raise e
             if len(xml_db) < 1000:
                 _LOGGER.warning("Downloaded short .dc file; "
                                 " check saved cache file on disk")
