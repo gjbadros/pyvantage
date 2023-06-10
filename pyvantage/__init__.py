@@ -307,7 +307,13 @@ class VantageConnection(threading.Thread):
                 self._chunk += new_chunk
         except socket.timeout:
             pass
-        [data, self._chunk] = self._chunk.split(delimiter, 1)
+        data_and_rest = self._chunk.split(delimiter, 1)
+        if len(data_and_rest) == 1:
+            data = data_and_rest[0]
+            self._chunk = b''
+        else:
+            [data, self._chunk] = data_and_rest
+
         return data
 
     def _do_login_locked(self, i):
