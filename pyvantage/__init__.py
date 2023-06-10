@@ -1947,7 +1947,7 @@ class Output(VantageEntity):
                             (round(r*ratio), round(g*ratio), round(b*ratio), 0)))
         if self._dmx_color and self._level > 0:
             _LOGGER.debug('_invoke_rgb calling rampload to ensure dmx change is triggered')
-            self._vantage.send("RAMPLOAD", self._vid, self._level, 0.1)
+            self._vantage.send("RAMPLOAD", self._vid, round(self._level), 0.1)
 
         if self._level > 0:
             self._rgb_is_dirty = False
@@ -1978,7 +1978,7 @@ class Output(VantageEntity):
                             (h, s, self._level)))
         if self._dmx_color and self._level > 0:
             _LOGGER.debug('_invoke_hs calling rampload to ensure dmx change is triggered')
-            self._vantage.send("RAMPLOAD", self._vid, self._level, 0.1)
+            self._vantage.send("RAMPLOAD", self._vid, round(self._level), 0.1)
 
         if self._level > 0:
             self._rgb_is_dirty = False
@@ -2002,7 +2002,7 @@ class Output(VantageEntity):
                           "%s of dmx_color light", self, rgb, new_color_temp)
             self.rgb = rgb
         self._vantage.send("RAMPLOAD", self._color_control_vid,
-                            kelvin_to_level(new_color_temp),
+                            round(kelvin_to_level(new_color_temp)),
                             self._ramp_sec[2])
         self._color_temp = new_color_temp
 
@@ -2367,7 +2367,7 @@ class LoadGroup(Output):
                 self._vantage.send("INVOKE", vid,
                                    ("RGBLoad.SetRGBW %d %d %d %d" %
                                     (r*ratio, g*ratio, b*ratio, 0)))
-                self._vantage.send("RAMPLOAD", vid, self._level, 0.1)
+                self._vantage.send("RAMPLOAD", vid, round(self._level), 0.1)
         if self._level > 0:
             self._rgb_is_dirty = False
 
@@ -2380,7 +2380,7 @@ class LoadGroup(Output):
                 self._vantage.send("INVOKE", vid,
                                    ("RGBLoad.SetHSL %d %d %d" %
                                     (h, s, self._level-1)))
-                self._vantage.send("RAMPLOAD", vid, self._level, 0.1)
+                self._vantage.send("RAMPLOAD", vid, round(self._level), 0.1)
 
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
