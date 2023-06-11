@@ -29,7 +29,7 @@ $ docker-shell homeassistant
 """
 
 __Author__ = "Greg J. Badros"
-__copyright__ = "Copyright 2018, 2019, 2020 Greg J. Badros"
+__copyright__ = "Copyright 2018-2023 Greg J. Badros"
 
 # USAGE:
 #
@@ -120,6 +120,7 @@ import re
 import json
 import os
 import traceback
+import math
 
 from collections import deque
 from xml.sax.saxutils import escape
@@ -150,6 +151,65 @@ def level_to_mireds(level):
     kelvin = level_to_kelvin(level)
     mireds = 1000000/kelvin
     return mireds
+
+def kelvin_to_rgb(colour_temperature):
+    """
+    Converts from K to RGB, algorithm courtesy of
+    http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
+    """
+    #range check
+    if colour_temperature < 1000:
+        colour_temperature = 1000
+    elif colour_temperature > 40000:
+        colour_temperature = 40000
+
+    tmp_internal = colour_temperature / 100.0
+
+    # red
+    if tmp_internal <= 66:
+        red = 255
+    else:
+        tmp_red = 329.698727446 * math.pow(tmp_internal - 60, -0.1332047592)
+        if tmp_red < 0:
+            red = 0
+        elif tmp_red > 255:
+            red = 255
+        else:
+            red = tmp_red
+
+    # green
+    if tmp_internal <=66:
+        tmp_green = 99.4708025861 * math.log(tmp_internal) - 161.1195681661
+        if tmp_green < 0:
+            green = 0
+        elif tmp_green > 255:
+            green = 255
+        else:
+            green = tmp_green
+    else:
+        tmp_green = 288.1221695283 * math.pow(tmp_internal - 60, -0.0755148492)
+        if tmp_green < 0:
+            green = 0
+        elif tmp_green > 255:
+            green = 255
+        else:
+            green = tmp_green
+
+    # blue
+    if tmp_internal >=66:
+        blue = 255
+    elif tmp_internal <= 19:
+        blue = 0
+    else:
+        tmp_blue = 138.5177312231 * math.log(tmp_internal - 10) - 305.0447927307
+        if tmp_blue < 0:
+            blue = 0
+        elif tmp_blue > 255:
+            blue = 255
+        else:
+            blue = tmp_blue
+
+    return red, green, blue
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -189,6 +249,7 @@ class VantageConnection(threading.Thread):
         self._recv_cb = recv_callback
         self._done = False
         self._commdebug = commdebug
+        self._chunk = b''
 
         if use_ssl:
             self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
@@ -236,14 +297,23 @@ class VantageConnection(threading.Thread):
 
     def _read_until(self, delimiter, i):
         """Read data from a socket until a delimiter is found."""
-        data = b''
-        while True:
-            chunk = self._sockets[i].recv(1024)
-            if not chunk:
-                break
-            data += chunk
-            if delimiter in data:
-                break
+        try:
+            while True:
+                if delimiter in self._chunk:
+                    break
+                new_chunk = self._sockets[i].recv(1024)
+                if not new_chunk:
+                    break
+                self._chunk += new_chunk
+        except socket.timeout:
+            pass
+        data_and_rest = self._chunk.split(delimiter, 1)
+        if len(data_and_rest) == 1:
+            data = data_and_rest[0]
+            self._chunk = b''
+        else:
+            [data, self._chunk] = data_and_rest
+
         return data
 
     def _do_login_locked(self, i):
@@ -323,8 +393,11 @@ class VantageConnection(threading.Thread):
                         _LOGGER.error("Exceptional socket #%s: %s", i, t)
                         raise EOFError()
                     if sock in readable:
-                        line = self._read_until(b'\n', i)
-                        self._recv_cb(line.decode('ascii').rstrip(), i)
+                        line = self._read_until(b'\r\n', i)
+                        try:
+                            self._recv_cb(line.decode('ascii').rstrip(), i)
+                        except Exception as e:
+                            _LOGGER.error("Exception in recv_cb on line %s: %s", line, e)
             except EOFError:
                 _LOGGER.warning("run got EOFError")
                 with self._lock:
@@ -1172,9 +1245,12 @@ class Vantage():
             cmds = self._s_cmds
             typ = 'S'
         else:
-            _LOGGER.error("#%s _recv got unknown line start character", i)
+            _LOGGER.error("#%s _recv got unknown line start character: %s", i, line)
             return
         parts = re.split(r'[ :]', line[2:])
+        if len(parts) < 2:
+            _LOGGER.error("#%s Got partial line: %s", i, line)
+            return
         cmd_type = parts[0]
         vid = parts[1]
         args = parts[2:]
@@ -1200,10 +1276,8 @@ class Vantage():
             _LOGGER.error(" #%s _recv got ERROR line: %s", i, line)
             return
         if cmd_type in {'GETLOAD', 'GETPOWER', 'GETCURRENT',
-                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT'}:
+                        'GETVARIABLE', 'GETSENSOR', 'GETLIGHT', 'GETBLIND'}:
             cmd_type = cmd_type[3:]  # strip "GET" from front
-        elif cmd_type == 'GETBLIND':
-            return
         elif cmd_type == 'TASK':
             return
         elif cmd_type == 'VARIABLE':
@@ -1226,7 +1300,7 @@ class Vantage():
             if (typ == 'S' or
                     (typ == 'R' and
                      cmd_type in ('LOAD', 'POWER', 'CURRENT',
-                                  'VARIABLE', 'SENSOR', 'LIGHT'))):
+                                  'VARIABLE', 'SENSOR', 'LIGHT', 'BLIND'))):
                 self.handle_update_and_notify(obj, args, vid)
 
     # Note: invoked on VantageConnection thread.
@@ -1332,6 +1406,14 @@ class Vantage():
                 ts = self._ssl_context.wrap_socket(ts)
 
             if self._user:
+                # _LOGGER.info("trying introspection")
+                # ts.send(("<IIntrospection><GetSysInfo><call></call></GetSysInfo></IIntrospection>\n").encode("ascii"))
+                # response = ""
+                # while not response.endswith("</IIntrospection>\n"):
+                #     response += ts.recv(4096).decode('ascii')
+                # _LOGGER.debug("introspection response = " + response)
+
+                _LOGGER.debug("trying to login")
                 ts.send(("<ILogin><Login><call><User>%s</User>"
                          "<Password>%s</Password>"
                          "</call></Login></ILogin>\n"
@@ -1373,13 +1455,18 @@ class Vantage():
             _LOGGER.debug("done reading, size = %s", len(response))
 
             response = response.decode('ascii')
+            orig_response = response
 
-            # read XML preserving processing instructions
-            response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
-            response = response.find("GetFile/return")
-            response = next(response.iter(tag=ET.ProcessingInstruction))
-            response = response.text.split()[2][1:]
-            xml_db = base64.b64decode(response).decode('utf-8')
+            try:
+                # read XML preserving processing instructions
+                response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
+                response = response.find("GetFile/return")
+                response = next(response.iter(tag=ET.ProcessingInstruction))
+                response = response.text.split()[2][1:]
+                xml_db = base64.b64decode(response).decode('utf-8')
+            except Exception as e:
+                _LOGGER.warning("Could not parse XML response:\n\"\"\"\n%s\n\"\"\"", orig_response)
+                raise e
             if len(xml_db) < 1000:
                 _LOGGER.warning("Downloaded short .dc file; "
                                 " check saved cache file on disk")
@@ -1826,9 +1913,9 @@ class Output(VantageEntity):
                 ramp_sec = self._ramp_sec[1]
             else:
                 ramp_sec = self._ramp_sec[0]
-            self._vantage.send("RAMPLOAD", self._vid, new_level, ramp_sec)
+            self._vantage.send("RAMPLOAD", self._vid, round(new_level), ramp_sec)
         else:
-            self._vantage.send("LOAD", self._vid, new_level)
+            self._vantage.send("LOAD", self._vid, round(new_level))
 
     level = property(_get_level, _set_level)
 
@@ -1863,7 +1950,11 @@ class Output(VantageEntity):
         ratio = self._level/100
         self._vantage.send("INVOKE", self._vid,
                            ("RGBLoad.SetRGBW %d %d %d %d" %
-                            (r*ratio, g*ratio, b*ratio, 0)))
+                            (round(r*ratio), round(g*ratio), round(b*ratio), 0)))
+        if self._dmx_color and self._level > 0:
+            _LOGGER.debug('_invoke_rgb calling rampload to ensure dmx change is triggered')
+            self._vantage.send("RAMPLOAD", self._vid, round(self._level), 0.1)
+
         if self._level > 0:
             self._rgb_is_dirty = False
 
@@ -1891,6 +1982,12 @@ class Output(VantageEntity):
         self._vantage.send("INVOKE", self._vid,
                            ("RGBLoad.SetHSL %d %d %d" %
                             (h, s, self._level)))
+        if self._dmx_color and self._level > 0:
+            _LOGGER.debug('_invoke_hs calling rampload to ensure dmx change is triggered')
+            self._vantage.send("RAMPLOAD", self._vid, round(self._level), 0.1)
+
+        if self._level > 0:
+            self._rgb_is_dirty = False
 
     @property
     def color_temp(self):
@@ -1906,12 +2003,13 @@ class Output(VantageEntity):
         if self._color_temp == new_color_temp:
             return
         if self._dmx_color or self._load_type == "DW":
-            _LOGGER.debug("%s: Ignoring call to setter for color_temp "
-                          "of dmx_color light", self)
-        else:
-            self._vantage.send("RAMPLOAD", self._color_control_vid,
-                               kelvin_to_level(new_color_temp),
-                               self._ramp_sec[2])
+            rgb = kelvin_to_rgb(new_color_temp)
+            _LOGGER.debug("%s: Using rgb of %s for call to setter for color_temp "
+                          "%s of dmx_color light", self, rgb, new_color_temp)
+            self.rgb = rgb
+        self._vantage.send("RAMPLOAD", self._color_control_vid,
+                            round(kelvin_to_level(new_color_temp)),
+                            self._ramp_sec[2])
         self._color_temp = new_color_temp
 
 # At some later date, we may want to also specify fade and delay times
@@ -2275,6 +2373,7 @@ class LoadGroup(Output):
                 self._vantage.send("INVOKE", vid,
                                    ("RGBLoad.SetRGBW %d %d %d %d" %
                                     (r*ratio, g*ratio, b*ratio, 0)))
+                self._vantage.send("RAMPLOAD", vid, round(self._level), 0.1)
         if self._level > 0:
             self._rgb_is_dirty = False
 
@@ -2286,7 +2385,8 @@ class LoadGroup(Output):
             if load and (load._dmx_color or load._load_type == "DW"):
                 self._vantage.send("INVOKE", vid,
                                    ("RGBLoad.SetHSL %d %d %d" %
-                                    (h, s, self._level)))
+                                    (h, s, self._level-1)))
+                self._vantage.send("RAMPLOAD", vid, round(self._level), 0.1)
 
     def __do_query_level(self):
         """Helper to perform the actual query the current dimmer level of the
@@ -2431,7 +2531,11 @@ class PollingSensor(VantageSensor):
             else:
                 value = float(args[0])
         except Exception:
-            value = args[0]
+            if len(args) >= 1:
+                value = args[0]
+            else:
+                _LOGGER.error("No args for sensor value (%s) %s (%d)", self._name, self._kind, self._vid)
+                return self
         _LOGGER.debug("Setting sensor (%s) %s (%d) to %s",
                       self._name, self._kind, self._vid, value)
         self._value = value

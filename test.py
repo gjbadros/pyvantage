@@ -29,6 +29,8 @@ def parse_args():
                         help="Use cache instead of refetching config from host")
     parser.add_argument('--parse-file', action='store', dest='dc_filename',
                         help="Just parse the file instead of connecting to host")
+    parser.add_argument('--run-one-test', action='store_true', dest='run_one_test',
+                        help="Run single test")
     parser.add_argument('--run-tests', action='store_true', dest='run_tests',
                         help="Run various tests to demonstrate some functonality")
     parser.add_argument('--run-new-tests', action='store_true', dest='run_new_tests',
@@ -45,6 +47,7 @@ def parse_args():
                         help='Display all buttons after parsing')
     parser.add_argument('--num-connections', action='store', dest='num_connections',
                         help='Number of command processing connections to use')
+    parser.add_argument('--use-ssl', action='store_true', dest='use_ssl')
 
     results = parser.parse_args()
     return results
@@ -136,7 +139,7 @@ def main():
     args = parse_args()
 
     if args.dc_filename is not None:
-        v = Vantage(None, None, None, filename=args.dc_filename)
+        v = Vantage(None, None, None, filename=args.dc_filename, file_port=2010, cmd_port=3010, use_ssl=True)
         try:
             f = open(args.dc_filename, "r")
             xml_db = f.read()
@@ -151,8 +154,8 @@ def main():
         return
 
     v = Vantage(args.host, args.user, args.password, None, None,
-                3001, 2001, name_mappings, None, True,
-                int(args.num_connections) if args.num_connections else 1)
+                3010 if args.use_ssl else 3001, 2010 if args.use_ssl else 2001, name_mappings, None, True,
+                int(args.num_connections) if args.num_connections else 1, use_ssl=args.use_ssl)
     v.load_xml_db(not args.use_cache)
     v.connect()
     time.sleep(2)
@@ -163,11 +166,26 @@ def main():
     if args.run_new_tests:
         run_new_tests(v)
 
+    if args.run_one_test:
+        print("bonus bed ball -- lifx via virtual dmx")
+        bbb = v._vid_to_load[4536]
+        bbb.level = 50
+        time.sleep(2)
+
+        bbb.hs = (56, 20)
+        time.sleep(3)
+        bbb.rgb = (255, 30, 70)
+        time.sleep(3)
+        bbb.color_temp = 2000
+        time.sleep(3)
+        bbb.color_temp = 4000
+
     if args.get_levels_test:
         for vid in [3442, 3455, 3456, 3457, 3458, 3459, 3462, 3463, 3468, 3469, 3470, 3471, 3472, 3473, 3474, 3477, 3479, 3481, 3482, 3483, 3484, 3485, 3486, 3487, 3488, 3489, 3500, 3502, 3503, 3504, 3505, 3506, 3507, 3508, 3509, 3510, 3552, 3553, 3554, 3555, 3556, 3557, 3558, 3559, 3729, 3730, 3736, 4388, 4395, 4506, 4507, 4508, 4523, 4524, 4525, 4526, 4527, 4528, 4529, 4536, 4625, 4626, 4627, 4634, 4722, 4727, 5320, 5844, 5846, 5848, 5850, 5852, 5855, 6180, 6181, 6184, 6185, 6186, 6187, 6188, 6189, 6190, 6191, 6192, 6193, 6194, 6195, 6196, 6199, 7029, 7030, 7033, 7034, 7035, 7036, 7037, 7166, 7167]:
             _LOGGER.info("%s has level %s", vid, v._vid_to_load[vid].level)
 
-    time.sleep(args.sleep_for)
+    if args.sleep_for:
+        time.sleep(args.sleep_for)
 
     if args.dump_outputs:
         for output in v.outputs:
