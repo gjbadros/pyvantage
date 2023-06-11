@@ -9,3 +9,8 @@ bin
 lib
 share
 mprofile_*
+lib64/
+.vscode/settings.json
+.vscode/.ropeproject/config.py
+uniq-vids.txt
+vids.txt
