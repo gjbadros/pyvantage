@@ -316,7 +316,7 @@ class VantageConnection(threading.Thread):
 
         return data
 
-    def _do_login_locked(self, i):
+    def _do_login_locked(self, i: int):
         """Executes the login procedure as well as setting up some
         connection defaults like turning off the prompt, etc."""
         while True:
@@ -390,7 +390,7 @@ class VantageConnection(threading.Thread):
                 readable, _, exceptional = select.select(self._sockets, [], [])
                 for i, sock in enumerate(self._sockets):
                     if sock in exceptional:
-                        _LOGGER.error("Exceptional socket #%s: %s", i, t)
+                        _LOGGER.error("Exceptional socket #%s: %s", i, sock)
                         raise EOFError()
                     if sock in readable:
                         line = self._read_until(b'\r\n', i)
@@ -685,6 +685,7 @@ class VantageXmlDbParser():
     def _parse_area(self, area_xml):
         """Parses an Area tag, which is effectively a room, depending on how the
         Vantage controller programming was done."""
+        vid: int = 0
         try:
             vid = int(area_xml.get('VID'))
             area = Area(self._vantage,
@@ -698,6 +699,7 @@ class VantageXmlDbParser():
 
     def _parse_irzone(self, irzone_xml):
         """Parses an IRZone tag, which we treat like an area with no parent."""
+        vid: int = 0
         try:
             vid = int(irzone_xml.get('VID'))
             irzone = Area(self._vantage,
@@ -711,6 +713,7 @@ class VantageXmlDbParser():
 
     def _parse_variable(self, var_xml):
         """Parses a variable (GMem) tag."""
+        vid: int = 0
         try:
             vid = int(var_xml.get('VID'))
             subtype_node = var_xml.find('Tag')
@@ -726,6 +729,7 @@ class VantageXmlDbParser():
 
     def _parse_omnisensor(self, sensor_xml):
         """Parses an OmniSensor tag."""
+        vid: int = 0
         try:
             vid = int(sensor_xml.get('VID'))
             kind = {
@@ -743,6 +747,7 @@ class VantageXmlDbParser():
 
     def _parse_lightsensor(self, sensor_xml):
         """Parses a LightSensor object."""
+        vid: int = 0
         try:
             vid = int(sensor_xml.get('VID'))
             value_range = (float(sensor_xml.findtext('RangeLow')),
@@ -761,6 +766,7 @@ class VantageXmlDbParser():
         Either a MechoShade.IQ2_Shade_Node_CHILD or
         QMotion.QIS_Channel_CHILD (shade) tag.
         """
+        vid: int = 0
         try:
             vid = int(shade_xml.get('VID'))
             shade = Shade(self._vantage,
@@ -1170,7 +1176,7 @@ class Vantage():
 
         """
 
-        if vid == None:
+        if vid is None:
             vid = obj.vid
         # First, register the VID in our _ids map.  When we issue commands to
         # the Vantage this map lets us route the respones to the correct object
@@ -1461,6 +1467,7 @@ class Vantage():
                 # read XML preserving processing instructions
                 response = ET.fromstring(response, parser=ET.XMLParser(target=ET.TreeBuilder(insert_pis=True)))
                 response = response.find("GetFile/return")
+                # TODO: Expected type 'str | None', got '(target: str, text: str | None) -> Element' instead
                 response = next(response.iter(tag=ET.ProcessingInstruction))
                 response = response.text.split()[2][1:]
                 xml_db = base64.b64decode(response).decode('utf-8')
@@ -1571,6 +1578,7 @@ class VantageEntity:
         self._area = area
         self._vid = vid
         self._extra_info = {}
+        self._load_type: str | None = None
 
     def needs_poll(self):
         """Does not poll by default."""
@@ -2357,6 +2365,7 @@ class LoadGroup(Output):
     def _set_level(self, new_level):
         if self._brightness_vid:
             self._vantage._vid_to_load.get(self._brightness_vid).level = new_level
+        # TODO: new_level unexpected argument?
         super(LoadGroup, self)._set_level(new_level)
 
     level = property(_get_level, _set_level)
